@@ -37,6 +37,9 @@ AIと人間が対戦する描画バトル（AI解読バトルモード）を最�
 - [x] 推測パネル (`src/components/GuessingPanel.tsx`)
 - [x] タイマー + ヘッダー + スコアボード
 - [x] ゲームページ フェーズ管理 (`src/app/game/page.tsx`)
+- [x] GitHubリポジトリ作成 (https://github.com/kasi-x/vive-gamer)
+- [x] バグ修正: AIタイマーリーク、キャンバスクリア、二重join、endRound再入、Unicode正規化
+- [x] ストローク履歴保持 + 途中参加者へのcanvas_state送信
 
 ## 未対応（今後の改善）
 - [ ] モバイルレイアウト最適化
