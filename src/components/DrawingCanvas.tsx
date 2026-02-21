@@ -147,6 +147,18 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     return () => clearInterval(interval);
   }, []);
 
+  const [scanning, setScanning] = useState(false);
+
+  // AIスキャンイベント受信
+  useEffect(() => {
+    const handleAIScan = () => {
+      setScanning(true);
+      setTimeout(() => setScanning(false), 1500);
+    };
+    socket.on("ai_scan", handleAIScan);
+    return () => { socket.off("ai_scan", handleAIScan); };
+  }, [socket]);
+
   const handleClear = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -158,13 +170,27 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
 
   return (
     <div className="flex flex-col gap-2 sm:gap-3">
-      <canvas
-        ref={canvasRef}
-        width={800}
-        height={600}
-        className="w-full rounded-xl border-2 border-[var(--surface-light)] cursor-crosshair bg-white touch-none"
-        style={{ aspectRatio: "4/3" }}
-      />
+      <div className="relative overflow-hidden rounded-xl">
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={600}
+          className="w-full border-2 border-[var(--surface-light)] cursor-crosshair bg-white touch-none rounded-xl"
+          style={{ aspectRatio: "4/3" }}
+        />
+        {scanning && (
+          <div className="absolute inset-0 pointer-events-none rounded-xl overflow-hidden">
+            <div className="ai-scan-beam" />
+            <div className="ai-scan-flash" />
+            <div className="absolute top-3 left-3 ai-scan-label">
+              <div className="flex items-center gap-2 bg-black/70 text-[var(--accent)] text-xs font-bold px-3 py-1.5 rounded-full border border-[var(--accent)]/50">
+                <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                AI SCANNING
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ツールバー */}
       <div className="flex items-center gap-2 sm:gap-4 bg-[var(--surface)] rounded-xl px-2 sm:px-4 py-2 flex-wrap">

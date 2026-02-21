@@ -60,3 +60,51 @@ body {
 .animate-flash-green { animation: flash-green 0.6s ease-out; }
 .animate-shake { animation: shake 0.3s ease-out; }
 .animate-score-pop { animation: score-pop 0.4s ease-out; }
+
+/* AI巡回スキャンライト */
+@keyframes ai-beam-sweep {
+  0% { left: -20%; }
+  100% { left: 120%; }
+}
+@keyframes ai-flash {
+  0% { opacity: 0; }
+  30% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes ai-label-in {
+  0% { opacity: 0; transform: translateX(20px); }
+  20% { opacity: 1; transform: translateX(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.ai-scan-beam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 15%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(233, 69, 96, 0.05) 20%,
+    rgba(233, 69, 96, 0.25) 45%,
+    rgba(233, 69, 96, 0.4) 50%,
+    rgba(233, 69, 96, 0.25) 55%,
+    rgba(233, 69, 96, 0.05) 80%,
+    transparent 100%
+  );
+  animation: ai-beam-sweep 1.5s ease-in-out forwards;
+  box-shadow: 0 0 60px 20px rgba(233, 69, 96, 0.15);
+}
+
+.ai-scan-flash {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(233, 69, 96, 0.6);
+  border-radius: inherit;
+  animation: ai-flash 1.5s ease-out forwards;
+}
+
+.ai-scan-label {
+  animation: ai-label-in 1.5s ease-out forwards;
+}

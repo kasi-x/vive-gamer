@@ -128,15 +128,23 @@ function startRound(io: Server) {
     }
   }, 1000);
 
-  // AI推測タイマー開始（最初の推測は5秒後）— ハンドルを保持してリーク防止
+  // AI推測タイマー開始（最初のスキャンは5秒後）
+  // スキャン演出(1.5秒) → 推測実行の順序
+  const AI_SCAN_DURATION = 1500;
+
+  const triggerAIScan = () => {
+    if (room.phase !== "playing" || room.aiCorrect) return;
+    io.emit("ai_scan"); // クライアントにスキャン演出を通知
+    setTimeout(() => doAIGuess(io), AI_SCAN_DURATION);
+  };
+
   room.aiInitTimer = setTimeout(() => {
     room.aiInitTimer = null;
     if (room.phase !== "playing") return;
-    doAIGuess(io);
+    triggerAIScan();
 
     room.aiTimer = setInterval(() => {
-      if (room.phase !== "playing" || room.aiCorrect) return;
-      doAIGuess(io);
+      triggerAIScan();
     }, AI_GUESS_INTERVAL);
   }, 5000);
 }
