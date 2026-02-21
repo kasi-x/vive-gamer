@@ -41,12 +41,23 @@ export default function ViewCanvas({ socket }: ViewCanvasProps) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     };
 
+    const handleCanvasState = (data: {
+      strokes: { points: { x: number; y: number }[]; color: string; width: number }[];
+    }) => {
+      handleClear();
+      for (const stroke of data.strokes) {
+        handleDraw(stroke);
+      }
+    };
+
     socket.on("draw", handleDraw);
     socket.on("clear_canvas", handleClear);
+    socket.on("canvas_state", handleCanvasState);
 
     return () => {
       socket.off("draw", handleDraw);
       socket.off("clear_canvas", handleClear);
+      socket.off("canvas_state", handleCanvasState);
     };
   }, [socket]);
 

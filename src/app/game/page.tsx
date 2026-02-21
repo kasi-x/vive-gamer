@@ -46,7 +46,6 @@ export default function GamePage() {
 
   const handleReturnToLobby = useCallback(() => {
     socket.emit("return_to_lobby");
-    setPhase("lobby");
   }, [socket]);
 
   useEffect(() => {
@@ -66,6 +65,8 @@ export default function GamePage() {
 
     socket.on("lobby_update", (data: LobbyUpdatePayload) => {
       setPlayers(data.players);
+      // サーバーからlobby_updateが来たらlobbyフェーズに戻す
+      setPhase((prev) => (prev === "game_end" ? "lobby" : prev));
     });
 
     socket.on("game_start", (data: GameStartPayload) => {

@@ -18,11 +18,13 @@ interface GameRoom {
   drawerIndex: number;
   timer: ReturnType<typeof setInterval> | null;
   aiTimer: ReturnType<typeof setInterval> | null;
+  aiInitTimer: ReturnType<typeof setTimeout> | null;
   remaining: number;
   correctGuessers: Set<string>;
   aiGuessCount: number;
   aiCorrect: boolean;
   roundScoreDeltas: Map<string, number>;
+  strokeHistory: { points: { x: number; y: number }[]; color: string; width: number }[];
 }
 
 // 単一ルームのゲーム状態
@@ -38,11 +40,13 @@ const room: GameRoom = {
   drawerIndex: 0,
   timer: null,
   aiTimer: null,
+  aiInitTimer: null,
   remaining: ROUND_TIME,
   correctGuessers: new Set(),
   aiGuessCount: 0,
   aiCorrect: false,
   roundScoreDeltas: new Map(),
+  strokeHistory: [],
 };
 
 function getPlayerList() {
@@ -66,7 +70,13 @@ function clearTimers() {
     clearInterval(room.aiTimer);
     room.aiTimer = null;
   }
+  if (room.aiInitTimer) {
+    clearTimeout(room.aiInitTimer);
+    room.aiInitTimer = null;
+  }
 }
+
+const normalize = (s: string) => s.trim().normalize("NFC");
 
 function startRound(io: Server) {
   room.phase = "playing";
@@ -75,6 +85,7 @@ function startRound(io: Server) {
   room.aiGuessCount = 0;
   room.aiCorrect = false;
   room.roundScoreDeltas.clear();
+  room.strokeHistory = [];
 
   // 次の描き手を選択
   room.drawerId = room.drawerOrder[room.drawerIndex];
@@ -110,8 +121,9 @@ function startRound(io: Server) {
     }
   }, 1000);
 
-  // AI推測タイマー開始（最初の推測は5秒後）
-  setTimeout(() => {
+  // AI推測タイマー開始（最初の推測は5秒後）— ハンドルを保持してリーク防止
+  room.aiInitTimer = setTimeout(() => {
+    room.aiInitTimer = null;
     if (room.phase !== "playing") return;
     doAIGuess(io);
 
@@ -152,13 +164,13 @@ function doAIGuess(io: Server) {
 
 function handleGuess(io: Server, playerId: string, text: string) {
   if (room.phase !== "playing") return;
-  if (playerId === room.drawerId) return; // 描き手は推測不可
-  if (room.correctGuessers.has(playerId)) return; // 既に正解済み
+  if (playerId === room.drawerId) return;
+  if (room.correctGuessers.has(playerId)) return;
 
   const player = room.players.get(playerId);
   if (!player) return;
 
-  const isCorrect = text.trim() === room.currentWord;
+  const isCorrect = normalize(text) === normalize(room.currentWord);
 
   if (isCorrect) {
     room.correctGuessers.add(playerId);
@@ -196,6 +208,7 @@ function handleGuess(io: Server, playerId: string, text: string) {
 }
 
 function endRound(io: Server) {
+  if (room.phase !== "playing") return; // 再入防止
   clearTimers();
   room.phase = "round_end";
 
@@ -260,6 +273,7 @@ function resetGame() {
   room.aiGuessCount = 0;
   room.aiCorrect = false;
   room.roundScoreDeltas.clear();
+  room.strokeHistory = [];
 
   // スコアリセット
   for (const player of room.players.values()) {
@@ -282,6 +296,12 @@ export function setupSocketHandlers(io: Server) {
       };
       room.players.set(socket.id, player);
       broadcastLobby(io);
+
+      // プレイ中に参加した場合、キャンバス状態を送信
+      if (room.phase === "playing" && room.strokeHistory.length > 0) {
+        socket.emit("canvas_state", { strokes: room.strokeHistory });
+      }
+
       console.log(`参加: ${nickname} (${socket.id})`);
     });
 
@@ -289,13 +309,10 @@ export function setupSocketHandlers(io: Server) {
       if (room.phase !== "lobby") return;
       if (room.players.size < 2) return;
 
+      resetGame();
+
       // 描き手の順番をシャッフル
       const playerIds = Array.from(room.players.keys());
-      room.drawerOrder = playerIds.sort(() => Math.random() - 0.5);
-      room.totalRounds = room.drawerOrder.length;
-      room.drawerIndex = 0;
-
-      resetGame();
       room.drawerOrder = playerIds.sort(() => Math.random() - 0.5);
       room.totalRounds = room.drawerOrder.length;
 
@@ -305,12 +322,14 @@ export function setupSocketHandlers(io: Server) {
     socket.on("draw", (data: { points: { x: number; y: number }[]; color: string; width: number }) => {
       if (room.phase !== "playing") return;
       if (socket.id !== room.drawerId) return;
+      room.strokeHistory.push(data);
       socket.broadcast.emit("draw", data);
     });
 
     socket.on("clear_canvas", () => {
       if (room.phase !== "playing") return;
       if (socket.id !== room.drawerId) return;
+      room.strokeHistory = [];
       socket.broadcast.emit("clear_canvas");
     });
 

@@ -6,8 +6,9 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io({
-      autoConnect: false,
+    socket = io({ autoConnect: false });
+    socket.on("disconnect", () => {
+      socket = null;
     });
   }
   return socket;

@@ -26,8 +26,16 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
   const isDrawing = useRef(false);
   const currentPoints = useRef<{ x: number; y: number }[]>([]);
   const lastSendTime = useRef(0);
+  const colorRef = useRef("#000000");
+  const widthRef = useRef(6);
+  const socketRef = useRef(socket);
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(6);
+
+  // Refsを最新のstate/propsと同期
+  useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { widthRef.current = width; }, [width]);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
 
   const getCanvasPos = useCallback(
     (e: PointerEvent): { x: number; y: number } => {
@@ -41,20 +49,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     []
   );
 
-  const sendBatch = useCallback(() => {
-    if (currentPoints.current.length < 2) return;
-    socket.emit("draw", {
-      points: [...currentPoints.current],
-      color,
-      width,
-    });
-    // 最後の点を次バッチの開始点として保持
-    currentPoints.current = [
-      currentPoints.current[currentPoints.current.length - 1],
-    ];
-    lastSendTime.current = Date.now();
-  }, [socket, color, width]);
-
+  // キャンバス初期化 + イベントリスナー（一度だけ）
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -81,6 +76,19 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       ctx.stroke();
     };
 
+    const sendBatch = () => {
+      if (currentPoints.current.length < 2) return;
+      socketRef.current.emit("draw", {
+        points: [...currentPoints.current],
+        color: colorRef.current,
+        width: widthRef.current,
+      });
+      currentPoints.current = [
+        currentPoints.current[currentPoints.current.length - 1],
+      ];
+      lastSendTime.current = Date.now();
+    };
+
     const onPointerDown = (e: PointerEvent) => {
       isDrawing.current = true;
       canvas.setPointerCapture(e.pointerId);
@@ -92,17 +100,15 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       const pos = getCanvasPos(e);
       currentPoints.current.push(pos);
 
-      // ローカル描画
       const pts = currentPoints.current;
       if (pts.length >= 2) {
         drawSegment(
           [pts[pts.length - 2], pts[pts.length - 1]],
-          color,
-          width
+          colorRef.current,
+          widthRef.current
         );
       }
 
-      // 50msスロットルでバッチ送信
       if (Date.now() - lastSendTime.current > 50) {
         sendBatch();
       }
@@ -127,7 +133,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointerleave", onPointerUp);
     };
-  }, [getCanvasPos, sendBatch, color, width]);
+  }, [getCanvasPos]);
 
   const handleClear = () => {
     const canvas = canvasRef.current;
