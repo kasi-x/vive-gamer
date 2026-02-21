@@ -161,7 +161,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
 
   // インク更新
   useEffect(() => {
-    const handleInkUpdate = (data: { inkRemaining: number; maxInk: number }) => {
+    const handleInkUpdate = (data: { inkRemaining: number; maxInk: number; strokesRemaining?: number | null }) => {
       setInkRemaining(data.inkRemaining);
     };
     const handleInkDepleted = () => {

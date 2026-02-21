@@ -44,12 +44,22 @@ AIと人間が対戦する描画バトル（AI解読バトルモード）を最�
 - [x] 切断時の再接続処理（Socket.io reconnection + 自動rejoin）
 - [x] アニメーション追加（正解フラッシュ、スコアpop、スライドイン、ローディングスピナー）
 
+## ゲーミフィケーション大改修（完了済み）
+- [x] スコアシステム改修（タイムボーナス、コンボ倍率、1番乗りボーナス）
+- [x] Web Audio API効果音（SoundManager: correct, wrong, combo, timerTick等）
+- [x] ConfettiOverlay（Canvas粒子システム）
+- [x] ScorePopup（+150テキストアニメーション）
+- [x] タイマー危険域演出（赤パルス、ビネット）
+- [x] インク制限システム（InkGauge、サーバー権威、効率ボーナス）
+- [x] おじゃまバトルモード（穴埋めクイズ対戦、スプラット、2分割レイアウト）
+- [x] 声入力（Web Speech API、GuessingPanel + おじゃまモード対応）
+- [x] VoiceButton / InkSplatOverlay / OjamaScreen コンポーネント
+- [x] splatHit / vsIntro / buzzIn 効果音追加
+- [x] InkConfig / InkUpdatePayload / SoundEffect 型定義
+
 ## 未対応（今後の改善）
 - [ ] 複数ルーム対応
 - [ ] 実際のAI（Gemini Flash Image）統合
-- [ ] Prompt Teleportモード
-- [ ] Speed Sketch Fixモード
-- [ ] 効果音
 - [ ] Redis Pub/Sub（スケーリング用）
 - [ ] デプロイ（Render等）
 

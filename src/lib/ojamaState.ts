@@ -11,7 +11,7 @@ interface OjamaPlayer {
   nickname: string;
   score: number;
   connected: boolean;
-  splatCount: number; // 現在受けているスプラット数
+  splatCount: number;
 }
 
 interface OjamaRoom {
@@ -94,7 +94,7 @@ function startCountdown(io: Server) {
     }
   }, 1000);
 
-  room.countdownTimer = setTimeout(() => {}, 3000); // cleanup reference
+  room.countdownTimer = setTimeout(() => {}, 3000);
 }
 
 function startRound(io: Server) {
@@ -124,7 +124,7 @@ function endRound(io: Server) {
   room.phase = "round_end";
 
   const scores = Array.from(room.players.values())
-    .map((p) => ({ nickname: p.nickname, score: p.score }))
+    .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
   io.to(ROOM).emit("ojama:round_end", {
@@ -145,7 +145,7 @@ function endGame(io: Server) {
   room.phase = "game_end";
 
   const finalScores = Array.from(room.players.values())
-    .map((p) => ({ nickname: p.nickname, score: p.score }))
+    .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
   io.to(ROOM).emit("ojama:game_end", {

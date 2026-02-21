@@ -87,6 +87,24 @@ class SoundManager {
   inkDepleted() {
     this.play(150, 0.4, "sawtooth", 0.1);
   }
+
+  splatHit() {
+    // 低音ドスッ + ノイズ風
+    this.play(120, 0.15, "square", 0.12);
+    setTimeout(() => this.play(80, 0.2, "sawtooth", 0.08), 50);
+  }
+
+  vsIntro() {
+    // 対戦開始の迫力ある和音
+    this.playChord([261, 329, 392], 0.15, "square", 0.08);
+    setTimeout(() => this.playChord([349, 440, 523], 0.3, "square", 0.1), 150);
+  }
+
+  buzzIn() {
+    // ブザー音（早押し正解時）
+    this.play(880, 0.05, "sine", 0.15);
+    setTimeout(() => this.play(1175, 0.12, "sine", 0.18), 60);
+  }
 }
 
 export const soundManager = typeof window !== "undefined" ? new SoundManager() : null!;

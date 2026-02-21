@@ -2,9 +2,10 @@ import type { Server } from "socket.io";
 import type { TeleportPhase, StyleCard, TeleportChainItem } from "../types/game";
 import { STYLE_CARDS } from "../types/game";
 import { generateMockImage } from "./mockImages";
+import { generateImageFromPrompt } from "./geminiImage";
 
 const PROMPT_TIME = 30;
-const AI_GEN_TIME = 3;
+const AI_GEN_TIME = 8; // Gemini画像生成の待ち時間（フォールバック含む）
 const DESCRIBE_TIME = 30;
 
 interface TeleportPlayer {
@@ -121,7 +122,7 @@ function startPromptWrite(io: Server) {
   startCountdown(io, PROMPT_TIME, () => startAIGenerating1(io));
 }
 
-function startAIGenerating1(io: Server) {
+async function startAIGenerating1(io: Server) {
   room.phase = "ai_generating";
   room.mockImages1.clear();
 
@@ -132,15 +133,27 @@ function startAIGenerating1(io: Server) {
     }
   }
 
-  // モック画像生成
-  for (const [id, prompt] of room.prompts) {
-    const style = room.styleCards.get(id);
-    room.mockImages1.set(id, generateMockImage(prompt, style));
-  }
-
   io.to(TELEPORT_ROOM).emit("teleport:phase", { phase: "ai_generating", timeLimit: AI_GEN_TIME });
 
-  setTimeout(() => startDescribe(io), AI_GEN_TIME * 1000);
+  const startTime = Date.now();
+
+  // Gemini画像生成（並列実行）
+  const entries = Array.from(room.prompts.entries());
+  const results = await Promise.all(
+    entries.map(async ([id, prompt]) => {
+      const style = room.styleCards.get(id);
+      const image = await generateImageFromPrompt(prompt, style);
+      return [id, image] as [string, string];
+    })
+  );
+  for (const [id, image] of results) {
+    room.mockImages1.set(id, image);
+  }
+
+  // 生成完了後に次フェーズへ（即座に遷移）
+  const elapsed = Date.now() - startTime;
+  console.log(`[テレポート] 画像生成1完了: ${elapsed}ms`);
+  startDescribe(io);
 }
 
 function startDescribe(io: Server) {
@@ -166,7 +179,7 @@ function startDescribe(io: Server) {
   startCountdown(io, DESCRIBE_TIME, () => startAIGenerating2(io));
 }
 
-function startAIGenerating2(io: Server) {
+async function startAIGenerating2(io: Server) {
   room.phase = "ai_generating_2";
   room.mockImages2.clear();
 
@@ -180,14 +193,25 @@ function startAIGenerating2(io: Server) {
     }
   }
 
-  // 説明文からモック画像を生成
-  for (const [describerId, desc] of room.descriptions) {
-    room.mockImages2.set(describerId, generateMockImage(desc));
-  }
-
   io.to(TELEPORT_ROOM).emit("teleport:phase", { phase: "ai_generating_2", timeLimit: AI_GEN_TIME });
 
-  setTimeout(() => startReveal(io), AI_GEN_TIME * 1000);
+  const startTime = Date.now();
+
+  // Gemini画像生成（並列実行）
+  const entries = Array.from(room.descriptions.entries());
+  const results = await Promise.all(
+    entries.map(async ([describerId, desc]) => {
+      const image = await generateImageFromPrompt(desc);
+      return [describerId, image] as [string, string];
+    })
+  );
+  for (const [describerId, image] of results) {
+    room.mockImages2.set(describerId, image);
+  }
+
+  const elapsed = Date.now() - startTime;
+  console.log(`[テレポート] 画像生成2完了: ${elapsed}ms`);
+  startReveal(io);
 }
 
 function startReveal(io: Server) {

@@ -51,6 +51,35 @@ export interface CorrectGuessPayload {
   totalEarned: number;
 }
 
+// サウンドエフェクト種別
+export type SoundEffect =
+  | "correct"
+  | "firstGuess"
+  | "wrong"
+  | "aiCorrect"
+  | "timerTick"
+  | "roundStart"
+  | "gameEnd"
+  | "combo"
+  | "inkDepleted"
+  | "splatHit"
+  | "vsIntro"
+  | "buzzIn";
+
+// インク設定
+export interface InkConfig {
+  maxInk: number;
+  maxStrokes: number | null;
+}
+
+// インク状態ペイロード
+export interface InkUpdatePayload {
+  inkRemaining: number;
+  maxInk: number;
+  strokesUsed: number;
+  maxStrokes: number | null;
+}
+
 // Socket event payloads
 export interface DrawPayload {
   points: { x: number; y: number }[];

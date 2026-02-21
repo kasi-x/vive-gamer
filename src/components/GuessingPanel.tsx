@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { Socket } from "socket.io-client";
 import type { GuessMessage, CorrectGuessPayload } from "@/types/game";
 import { soundManager } from "@/lib/sounds";
 import { showScorePopup } from "./ScorePopup";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
+import VoiceButton from "./VoiceButton";
 
 interface GuessingPanelProps {
   socket: Socket;
@@ -18,6 +20,14 @@ export default function GuessingPanel({ socket, disabled, myNickname }: Guessing
   const [correctFlash, setCorrectFlash] = useState(false);
   const [shaking, setShaking] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
+
+  const handleVoiceResult = useCallback((text: string) => {
+    socket.emit("guess", { text });
+  }, [socket]);
+
+  const { listening, interim, supported, start: startVoice, stop: stopVoice } = useVoiceInput({
+    onResult: handleVoiceResult,
+  });
 
   useEffect(() => {
     const handleNewGuess = (data: {
@@ -156,18 +166,31 @@ export default function GuessingPanel({ socket, disabled, myNickname }: Guessing
 
       {!disabled && (
         <form onSubmit={handleSubmit} className="p-2 sm:p-3 border-t border-[var(--surface-light)]">
+          {listening && interim && (
+            <div className="text-xs text-[var(--text-dim)] mb-1 px-1 truncate">
+              🎤 {interim}
+            </div>
+          )}
           <div className={`flex gap-2 ${shaking ? "animate-shake" : ""}`}>
             <input
               type="text"
-              value={input}
+              value={listening ? interim : input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="回答を入力..."
+              disabled={listening}
               className="flex-1 bg-[var(--surface-light)] text-[var(--text)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)] transition"
               autoFocus
             />
+            <VoiceButton
+              listening={listening}
+              supported={supported}
+              onStart={startVoice}
+              onStop={stopVoice}
+              size="sm"
+            />
             <button
               type="submit"
-              disabled={!input.trim()}
+              disabled={!input.trim() && !listening}
               className="bg-[var(--accent)] hover:bg-[var(--accent)]/80 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
             >
               送信

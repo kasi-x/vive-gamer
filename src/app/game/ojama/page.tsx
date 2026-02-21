@@ -6,6 +6,8 @@ import { getSocket } from "@/lib/socket";
 import { soundManager } from "@/lib/sounds";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import ConfettiOverlay from "@/components/ConfettiOverlay";
+import OjamaScreen from "@/components/OjamaScreen";
+import type { Splat } from "@/components/InkSplatOverlay";
 
 type OjamaPhase = "lobby" | "countdown" | "playing" | "round_end" | "game_end";
 
@@ -15,13 +17,7 @@ interface OjamaPlayerInfo {
   score: number;
 }
 
-interface Splat {
-  id: number;
-  x: number;
-  y: number;
-  rotation: number;
-  fading: boolean;
-}
+const SPLAT_LIMIT = 5;
 
 export default function OjamaPage() {
   const router = useRouter();
@@ -37,13 +33,13 @@ export default function OjamaPage() {
   const [countdownNum, setCountdownNum] = useState(3);
   const [input, setInput] = useState("");
   const [shaking, setShaking] = useState(false);
-  const [splats, setSplats] = useState<Splat[]>([]);
+  const [mySplats, setMySplats] = useState<Splat[]>([]);
+  const [opponentSplats, setOpponentSplats] = useState<Splat[]>([]);
   const [roundResult, setRoundResult] = useState<{ word: string; winnerNickname: string | null } | null>(null);
   const [finalScores, setFinalScores] = useState<OjamaPlayerInfo[]>([]);
   const [winner, setWinner] = useState("");
   const [connected, setConnected] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const socketRef = useRef(getSocket());
   const socket = socketRef.current;
@@ -89,8 +85,10 @@ export default function OjamaPage() {
       setRound(data.round);
       setTotalRounds(data.totalRounds);
       setInput("");
-      setSplats([]);
+      setMySplats([]);
+      setOpponentSplats([]);
       setRoundResult(null);
+      soundManager?.vsIntro();
     });
 
     s.on("ojama:countdown_tick", (data: { count: number }) => {
@@ -104,7 +102,6 @@ export default function OjamaPage() {
       setDifficulty(data.difficulty);
       setRemaining(data.timeLimit);
       soundManager?.roundStart();
-      setTimeout(() => inputRef.current?.focus(), 100);
     });
 
     s.on("ojama:timer_tick", (data: { remaining: number }) => {
@@ -116,7 +113,7 @@ export default function OjamaPage() {
 
     s.on("ojama:correct", (data: { playerId: string; nickname: string; earned: number }) => {
       if (data.playerId === s.id) {
-        soundManager?.firstGuess();
+        soundManager?.buzzIn();
       } else {
         soundManager?.aiCorrect();
       }
@@ -129,6 +126,7 @@ export default function OjamaPage() {
     });
 
     s.on("ojama:splat", (data: { splatId: number }) => {
+      soundManager?.splatHit();
       const newSplat: Splat = {
         id: data.splatId,
         x: 15 + Math.random() * 70,
@@ -136,22 +134,21 @@ export default function OjamaPage() {
         rotation: Math.random() * 360,
         fading: false,
       };
-      setSplats((prev) => [...prev.slice(-SPLAT_LIMIT + 1), newSplat]);
+      setMySplats((prev) => [...prev.slice(-SPLAT_LIMIT + 1), newSplat]);
 
-      // 3-5秒後にフェードアウト
       const fadeTime = 3000 + Math.random() * 2000;
       setTimeout(() => {
-        setSplats((prev) =>
+        setMySplats((prev) =>
           prev.map((sp) => (sp.id === data.splatId ? { ...sp, fading: true } : sp))
         );
         setTimeout(() => {
-          setSplats((prev) => prev.filter((sp) => sp.id !== data.splatId));
+          setMySplats((prev) => prev.filter((sp) => sp.id !== data.splatId));
         }, 500);
       }, fadeTime);
     });
 
     s.on("ojama:clear_splat", () => {
-      setSplats((prev) => {
+      setMySplats((prev) => {
         if (prev.length === 0) return prev;
         return prev.slice(1);
       });
@@ -271,7 +268,7 @@ export default function OjamaPage() {
           <p className="text-[var(--text-dim)] text-lg mb-2">
             ラウンド {round}/{totalRounds}
           </p>
-          <div className="text-8xl font-black text-[var(--accent)] animate-timer-pulse">
+          <div className="text-8xl font-black text-[var(--accent)] animate-vs-flash">
             {countdownNum}
           </div>
         </div>
@@ -361,14 +358,17 @@ export default function OjamaPage() {
     );
   }
 
-  // プレイ中
+  // プレイ中 — 2分割レイアウト
   const difficultyLabel = difficulty === 1 ? "かんたん" : difficulty === 2 ? "ふつう" : "むずかしい";
   const difficultyColor = difficulty === 1 ? "text-[var(--success)]" : difficulty === 2 ? "text-[var(--warning)]" : "text-[var(--accent)]";
 
+  const me = players.find((p) => p.id === myId);
+  const opponents = players.filter((p) => p.id !== myId);
+
   return (
-    <div className="min-h-screen flex flex-col p-3 sm:p-4 max-w-2xl mx-auto">
-      {/* ヘッダー */}
-      <div className="bg-[var(--surface)] rounded-xl px-4 py-3 flex items-center justify-between mb-3">
+    <div className="min-h-screen flex flex-col p-2 sm:p-3 max-w-6xl mx-auto">
+      {/* ヘッダー: ラウンド + 難易度 + タイマー */}
+      <div className="bg-[var(--surface)] rounded-xl px-4 py-2 flex items-center justify-between mb-2">
         <div className="text-sm text-[var(--text-dim)]">
           ラウンド{" "}
           <span className="text-[var(--text)] font-bold text-lg">{round}/{totalRounds}</span>
@@ -381,95 +381,50 @@ export default function OjamaPage() {
         </div>
       </div>
 
-      {/* スコアバー */}
-      <div className="flex gap-2 mb-4">
-        {players.map((p) => (
-          <div
-            key={p.id}
-            className={`flex-1 text-center px-2 py-1.5 rounded-lg text-sm ${
-              p.id === myId
-                ? "bg-[var(--accent)]/20 border border-[var(--accent)]/30"
-                : "bg-[var(--surface)]"
-            }`}
-          >
-            <div className="font-bold truncate">{p.nickname}</div>
-            <div className="text-lg font-bold tabular-nums">{p.score}</div>
+      {/* 2分割レイアウト: PC横並び / モバイル縦積み */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 min-h-0">
+        {/* 自分の画面 */}
+        {me && (
+          <div className="min-h-0 flex flex-col" style={{ minHeight: "0" }}>
+            <OjamaScreen
+              nickname={me.nickname}
+              score={me.score}
+              hint={hint}
+              splats={mySplats}
+              input={input}
+              onInputChange={setInput}
+              onSubmit={handleSubmit}
+              shaking={shaking}
+              isMe={true}
+              listening={listening}
+              interim={interim}
+              voiceSupported={supported}
+              onStartVoice={startVoice}
+              onStopVoice={stopVoice}
+            />
+          </div>
+        )}
+
+        {/* 相手の画面 */}
+        {opponents.map((opp) => (
+          <div key={opp.id} className="min-h-0 flex flex-col" style={{ minHeight: "0" }}>
+            <OjamaScreen
+              nickname={opp.nickname}
+              score={opp.score}
+              hint={hint}
+              splats={opponentSplats}
+              input=""
+              onInputChange={() => {}}
+              onSubmit={(e) => e.preventDefault()}
+              shaking={false}
+              isMe={false}
+            />
           </div>
         ))}
       </div>
-
-      {/* ヒント表示 + おじゃまインクエリア */}
-      <div className="relative flex-1 flex flex-col items-center justify-center bg-[var(--surface)] rounded-2xl p-6 mb-4 min-h-[200px]">
-        {/* ヒント */}
-        <div className="text-center z-10 relative">
-          <p className="text-sm text-[var(--text-dim)] mb-2">ヒント</p>
-          <p className="text-4xl sm:text-5xl font-black tracking-widest text-[var(--warning)]">
-            {hint}
-          </p>
-        </div>
-
-        {/* おじゃまインクスプラット */}
-        {splats.map((splat) => (
-          <div
-            key={splat.id}
-            className={`absolute pointer-events-none ${splat.fading ? "animate-splat-fade" : "animate-splat-in"}`}
-            style={{
-              left: `${splat.x}%`,
-              top: `${splat.y}%`,
-              transform: `rotate(${splat.rotation}deg)`,
-            }}
-          >
-            <svg width="80" height="80" viewBox="0 0 80 80">
-              <circle cx="40" cy="40" r="30" fill="rgba(15, 15, 26, 0.85)" />
-              <circle cx="25" cy="20" r="12" fill="rgba(15, 15, 26, 0.75)" />
-              <circle cx="60" cy="55" r="10" fill="rgba(15, 15, 26, 0.7)" />
-              <circle cx="55" cy="18" r="8" fill="rgba(15, 15, 26, 0.65)" />
-              <circle cx="20" cy="58" r="9" fill="rgba(15, 15, 26, 0.7)" />
-            </svg>
-          </div>
-        ))}
-      </div>
-
-      {/* 入力エリア */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <div className={`flex-1 flex gap-2 ${shaking ? "animate-shake" : ""}`}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={listening ? interim : input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="答えを入力..."
-            disabled={listening}
-            className="flex-1 bg-[var(--surface)] text-[var(--text)] rounded-xl px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-[var(--accent)] transition"
-            autoFocus
-          />
-          {supported && (
-            <button
-              type="button"
-              onClick={listening ? stopVoice : startVoice}
-              className={`px-4 py-3 rounded-xl text-lg transition ${
-                listening
-                  ? "bg-[var(--accent)] text-white animate-mic-pulse"
-                  : "bg-[var(--surface)] text-[var(--text-dim)] hover:text-[var(--text)]"
-              }`}
-            >
-              🎤
-            </button>
-          )}
-        </div>
-        <button
-          type="submit"
-          disabled={!input.trim() && !listening}
-          className="bg-[var(--accent)] hover:bg-[var(--accent)]/80 disabled:opacity-40 text-white font-bold px-6 py-3 rounded-xl text-lg transition"
-        >
-          回答
-        </button>
-      </form>
 
       {/* ビネット */}
       {remaining <= 5 && <div className="vignette-overlay" />}
     </div>
   );
 }
-
-const SPLAT_LIMIT = 5;

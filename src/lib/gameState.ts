@@ -8,6 +8,7 @@ const ROUND_TIME = 60;
 const AI_GUESS_INTERVAL = 8000;
 const COMBO_MULTIPLIERS = [1.0, 1.5, 2.0, 2.5, 3.0];
 const MAX_INK = 15000;
+const MAX_STROKES: number | null = null; // nullで無制限
 
 interface GameRoom {
   players: Map<string, Player>;
@@ -36,6 +37,7 @@ interface GameRoom {
   inkRemaining: number;
   strokesUsed: number;
   inkDepleted: boolean;
+  inkUsedAtFirstGuess: number | null; // 最初の正解時のインク使用量
 }
 
 const room: GameRoom = {
@@ -64,6 +66,7 @@ const room: GameRoom = {
   inkRemaining: MAX_INK,
   strokesUsed: 0,
   inkDepleted: false,
+  inkUsedAtFirstGuess: null,
 };
 
 function getPlayerList() {
@@ -111,6 +114,7 @@ function startRound(io: Server) {
   room.inkRemaining = MAX_INK;
   room.strokesUsed = 0;
   room.inkDepleted = false;
+  room.inkUsedAtFirstGuess = null;
 
   room.drawerId = room.drawerOrder[room.drawerIndex];
   room.drawerIndex++;
@@ -136,6 +140,8 @@ function startRound(io: Server) {
     inkRemaining: room.inkRemaining,
     maxInk: MAX_INK,
     strokesUsed: room.strokesUsed,
+    maxStrokes: MAX_STROKES,
+    strokesRemaining: MAX_STROKES !== null ? MAX_STROKES - room.strokesUsed : null,
   });
 
   room.remaining = ROUND_TIME;
@@ -226,7 +232,11 @@ function handleGuess(io: Server, playerId: string, text: string) {
 
     // 1番乗り判定
     const isFirstGuesser = room.firstGuesserId === null;
-    if (isFirstGuesser) room.firstGuesserId = playerId;
+    if (isFirstGuesser) {
+      room.firstGuesserId = playerId;
+      // 最初の正解時のインク使用量を記録
+      room.inkUsedAtFirstGuess = MAX_INK - room.inkRemaining;
+    }
 
     // コンボ
     player.comboCount++;
@@ -371,6 +381,7 @@ function resetGame() {
   room.inkRemaining = MAX_INK;
   room.strokesUsed = 0;
   room.inkDepleted = false;
+  room.inkUsedAtFirstGuess = null;
 
   for (const player of room.players.values()) {
     player.score = 0;
@@ -441,6 +452,13 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
     if (socket.id !== room.drawerId) return;
     if (room.inkDepleted) return;
 
+    // ストローク数制限チェック
+    if (MAX_STROKES !== null && room.strokesUsed >= MAX_STROKES) {
+      room.inkDepleted = true;
+      socket.emit("ink_depleted");
+      return;
+    }
+
     // インク消費計算
     const dist = calculateStrokeDistance(data.points);
     room.inkRemaining -= dist;
@@ -457,6 +475,8 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
       inkRemaining: room.inkRemaining,
       maxInk: MAX_INK,
       strokesUsed: room.strokesUsed,
+      maxStrokes: MAX_STROKES,
+      strokesRemaining: MAX_STROKES !== null ? MAX_STROKES - room.strokesUsed : null,
     });
 
     room.strokeHistory.push(data);
