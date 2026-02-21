@@ -12,6 +12,7 @@ interface GuessingPanelProps {
 export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<GuessMessage[]>([]);
+  const [correctFlash, setCorrectFlash] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,12 +41,15 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
         ...prev,
         {
           nickname: data.nickname,
-          text: "正解！",
+          text: data.isAI ? "AI が正解してしまった..." : "正解！",
           isCorrect: true,
           isAI: data.isAI,
           timestamp: Date.now(),
         },
       ]);
+      // 正解フラッシュ
+      setCorrectFlash(true);
+      setTimeout(() => setCorrectFlash(false), 600);
     };
 
     const handleGameStart = () => {
@@ -78,27 +82,30 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
   };
 
   return (
-    <div className="bg-[var(--surface)] rounded-xl flex flex-col h-full">
+    <div className={`bg-[var(--surface)] rounded-xl flex flex-col h-full transition-colors ${
+      correctFlash ? "animate-flash-green" : ""
+    }`}>
       <div className="px-4 py-2 border-b border-[var(--surface-light)] text-sm text-[var(--text-dim)]">
         推測チャット
       </div>
 
       <div
         ref={feedRef}
-        className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0"
-        style={{ maxHeight: "400px" }}
+        className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0 max-h-[250px] sm:max-h-[400px]"
       >
         {messages.length === 0 && (
-          <p className="text-[var(--text-dim)] text-sm text-center py-8">
+          <p className="text-[var(--text-dim)] text-sm text-center py-4 sm:py-8">
             {disabled ? "あなたが描いています" : "お題を推測しよう！"}
           </p>
         )}
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`text-sm px-3 py-1.5 rounded-lg ${
+            className={`text-sm px-3 py-1.5 rounded-lg animate-slide-up ${
               msg.isCorrect
-                ? "bg-[var(--success)]/20 text-[var(--success)] font-bold"
+                ? msg.isAI
+                  ? "bg-[var(--accent)]/20 text-[var(--accent)] font-bold"
+                  : "bg-[var(--success)]/20 text-[var(--success)] font-bold"
                 : msg.isAI
                 ? "bg-[var(--accent-2)]/30"
                 : "bg-[var(--surface-light)]"
@@ -117,7 +124,7 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
       </div>
 
       {!disabled && (
-        <form onSubmit={handleSubmit} className="p-3 border-t border-[var(--surface-light)]">
+        <form onSubmit={handleSubmit} className="p-2 sm:p-3 border-t border-[var(--surface-light)]">
           <div className="flex gap-2">
             <input
               type="text"

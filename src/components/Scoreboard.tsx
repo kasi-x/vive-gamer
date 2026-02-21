@@ -22,17 +22,17 @@ export default function Scoreboard({
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
-        <div className="text-center mb-6">
+        <div className="text-center mb-6 animate-pop-in">
           {isGameEnd ? (
             <>
-              <h2 className="text-4xl font-bold mb-2">ゲーム終了！</h2>
-              <p className="text-2xl text-[var(--warning)]">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-2">ゲーム終了！</h2>
+              <p className="text-xl sm:text-2xl text-[var(--warning)]">
                 🏆 {winner} の勝利！
               </p>
             </>
           ) : (
             <>
-              <h2 className="text-2xl font-bold mb-1">{title || "ラウンド終了"}</h2>
+              <h2 className="text-xl sm:text-2xl font-bold mb-1">{title || "ラウンド終了"}</h2>
               {word && (
                 <p className="text-lg text-[var(--text-dim)]">
                   お題: <span className="text-[var(--warning)] font-bold">{word}</span>
@@ -46,11 +46,12 @@ export default function Scoreboard({
           {scores.map((entry, i) => (
             <div
               key={entry.nickname}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl ${
+              className={`flex items-center gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-xl animate-slide-up ${
                 i === 0 && isGameEnd
                   ? "bg-[var(--warning)]/20 border border-[var(--warning)]/30"
                   : "bg-[var(--surface-light)]"
               }`}
+              style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}
             >
               <span className="text-lg font-bold text-[var(--text-dim)] w-8">
                 {i + 1}.
@@ -58,7 +59,7 @@ export default function Scoreboard({
               <span className="flex-1 font-medium">{entry.nickname}</span>
               {entry.roundDelta !== 0 && !isGameEnd && (
                 <span
-                  className={`text-sm font-bold ${
+                  className={`text-sm font-bold animate-score-pop ${
                     entry.roundDelta > 0
                       ? "text-[var(--success)]"
                       : "text-[var(--accent)]"

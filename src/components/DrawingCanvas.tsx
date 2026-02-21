@@ -145,7 +145,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2 sm:gap-3">
       <canvas
         ref={canvasRef}
         width={800}
@@ -155,14 +155,14 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       />
 
       {/* ツールバー */}
-      <div className="flex items-center gap-4 bg-[var(--surface)] rounded-xl px-4 py-2 flex-wrap">
+      <div className="flex items-center gap-2 sm:gap-4 bg-[var(--surface)] rounded-xl px-2 sm:px-4 py-2 flex-wrap">
         {/* カラー */}
-        <div className="flex gap-1.5">
+        <div className="flex gap-1 sm:gap-1.5 flex-wrap">
           {COLORS.map((c) => (
             <button
               key={c}
               onClick={() => setColor(c)}
-              className={`w-7 h-7 rounded-full border-2 transition ${
+              className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 transition ${
                 color === c
                   ? "border-[var(--accent)] scale-110"
                   : "border-transparent"
@@ -173,7 +173,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
         </div>
 
         {/* 太さ */}
-        <div className="flex gap-1.5 items-center border-l border-[var(--surface-light)] pl-4">
+        <div className="flex gap-1.5 items-center border-l border-[var(--surface-light)] pl-2 sm:pl-4">
           {WIDTHS.map((w) => (
             <button
               key={w}
@@ -189,7 +189,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
         {/* クリア */}
         <button
           onClick={handleClear}
-          className="ml-auto bg-[var(--surface-light)] hover:bg-[var(--accent)]/30 text-sm px-4 py-1.5 rounded-lg transition"
+          className="ml-auto bg-[var(--surface-light)] hover:bg-[var(--accent)]/30 text-sm px-3 sm:px-4 py-1.5 rounded-lg transition"
         >
           クリア
         </button>

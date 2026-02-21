@@ -40,15 +40,16 @@ AIと人間が対戦する描画バトル（AI解読バトルモード）を最�
 - [x] GitHubリポジトリ作成 (https://github.com/kasi-x/vive-gamer)
 - [x] バグ修正: AIタイマーリーク、キャンバスクリア、二重join、endRound再入、Unicode正規化
 - [x] ストローク履歴保持 + 途中参加者へのcanvas_state送信
+- [x] モバイルレイアウト最適化（レスポンシブpadding/gap/font-size）
+- [x] 切断時の再接続処理（Socket.io reconnection + 自動rejoin）
+- [x] アニメーション追加（正解フラッシュ、スコアpop、スライドイン、ローディングスピナー）
 
 ## 未対応（今後の改善）
-- [ ] モバイルレイアウト最適化
-- [ ] 切断時の再接続処理
 - [ ] 複数ルーム対応
 - [ ] 実際のAI（Gemini Flash Image）統合
 - [ ] Prompt Teleportモード
 - [ ] Speed Sketch Fixモード
-- [ ] 効果音・アニメーション
+- [ ] 効果音
 - [ ] Redis Pub/Sub（スケーリング用）
 - [ ] デプロイ（Render等）
 

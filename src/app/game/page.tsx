@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getSocket } from "@/lib/socket";
+import { getSocket, destroySocket } from "@/lib/socket";
 import Lobby from "@/components/Lobby";
 import DrawingCanvas from "@/components/DrawingCanvas";
 import ViewCanvas from "@/components/ViewCanvas";
@@ -103,23 +103,25 @@ export default function GamePage() {
       setConnected(false);
     });
 
+    socket.on("reconnect" as string, () => {
+      // 再接続時にjoinを再送信
+      setMyId(socket.id);
+      setConnected(true);
+      socket.emit("join", { nickname });
+    });
+
     return () => {
-      socket.off("connect");
-      socket.off("lobby_update");
-      socket.off("game_start");
-      socket.off("your_word");
-      socket.off("timer_tick");
-      socket.off("round_end");
-      socket.off("game_end");
-      socket.off("disconnect");
-      socket.disconnect();
+      destroySocket();
     };
   }, [router, socket]);
 
   if (!connected) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-[var(--text-dim)] text-lg">接続中...</p>
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[var(--text-dim)] text-lg">接続中...</p>
+        </div>
       </div>
     );
   }
@@ -151,7 +153,7 @@ export default function GamePage() {
 
   // playing phase
   return (
-    <div className="min-h-screen flex flex-col p-3 gap-3 max-w-7xl mx-auto">
+    <div className="min-h-screen flex flex-col p-2 sm:p-3 gap-2 sm:gap-3 max-w-7xl mx-auto">
       <GameHeader
         round={round}
         totalRounds={totalRounds}
@@ -160,7 +162,7 @@ export default function GamePage() {
         word={isDrawer ? word : undefined}
       />
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-3 min-h-0">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-2 sm:gap-3 min-h-0">
         <div className="min-h-0">
           {isDrawer ? (
             <DrawingCanvas socket={socket} />
