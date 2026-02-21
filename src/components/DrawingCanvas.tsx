@@ -90,13 +90,21 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     };
 
     const onPointerDown = (e: PointerEvent) => {
+      e.preventDefault();
       isDrawing.current = true;
       canvas.setPointerCapture(e.pointerId);
-      currentPoints.current = [getCanvasPos(e)];
+      const pos = getCanvasPos(e);
+      currentPoints.current = [pos];
+      // 点を即座に描画（タップだけでも見える）
+      ctx.fillStyle = colorRef.current;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, widthRef.current / 2, 0, Math.PI * 2);
+      ctx.fill();
     };
 
     const onPointerMove = (e: PointerEvent) => {
       if (!isDrawing.current) return;
+      e.preventDefault();
       const pos = getCanvasPos(e);
       currentPoints.current.push(pos);
 
@@ -122,8 +130,8 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       }
     };
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+    canvas.addEventListener("pointermove", onPointerMove, { passive: false });
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointerleave", onPointerUp);
 
@@ -176,7 +184,7 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
           width={800}
           height={600}
           className="w-full border-2 border-[var(--surface-light)] cursor-crosshair bg-white touch-none rounded-xl"
-          style={{ aspectRatio: "4/3" }}
+          style={{ aspectRatio: "4/3", touchAction: "none" }}
         />
         {scanning && (
           <div className="absolute inset-0 pointer-events-none rounded-xl overflow-hidden">

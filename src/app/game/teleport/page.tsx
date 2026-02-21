@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getSocket, destroySocket } from "@/lib/socket";
+import { getSocket } from "@/lib/socket";
 import type { TeleportChainItem, StyleCard } from "@/types/game";
 
 type Phase = "lobby" | "prompt_write" | "ai_generating" | "describe" | "ai_generating_2" | "reveal" | "voting" | "result";
@@ -27,38 +27,38 @@ export default function TeleportPage() {
   const [scores, setScores] = useState<{ nickname: string; score: number }[]>([]);
   const [revealIndex, setRevealIndex] = useState(0);
 
-  const socket = getSocket();
+  const socketRef = useRef(getSocket());
+  const socket = socketRef.current;
 
   const handleStartGame = useCallback(() => {
-    socket.emit("teleport:start_game");
-  }, [socket]);
+    socketRef.current.emit("teleport:start_game");
+  }, []);
 
   const handleSubmitPrompt = useCallback(() => {
     if (!prompt.trim()) return;
-    socket.emit("teleport:submit_prompt", { prompt: prompt.trim() });
+    socketRef.current.emit("teleport:submit_prompt", { prompt: prompt.trim() });
     setPromptSubmitted(true);
-  }, [socket, prompt]);
+  }, [prompt]);
 
   const handleSubmitDescription = useCallback(() => {
     if (!description.trim()) return;
-    socket.emit("teleport:submit_description", { description: description.trim() });
+    socketRef.current.emit("teleport:submit_description", { description: description.trim() });
     setDescriptionSubmitted(true);
-  }, [socket, description]);
+  }, [description]);
 
   const handleStartVoting = useCallback(() => {
-    socket.emit("teleport:start_voting");
-  }, [socket]);
+    socketRef.current.emit("teleport:start_voting");
+  }, []);
 
   const handleVote = useCallback((chainOwnerId: string) => {
-    socket.emit("teleport:vote", { chainOwnerId });
+    socketRef.current.emit("teleport:vote", { chainOwnerId });
     setVotedFor(chainOwnerId);
-  }, [socket]);
+  }, []);
 
   const handleReturnToLobby = useCallback(() => {
-    socket.emit("teleport:return_to_lobby");
-    // メインロビーに戻る
+    socketRef.current.emit("teleport:return_to_lobby");
     router.push("/game");
-  }, [socket, router]);
+  }, [router]);
 
   useEffect(() => {
     const nickname = sessionStorage.getItem("nickname");
@@ -67,36 +67,36 @@ export default function TeleportPage() {
       return;
     }
 
-    // join済みフラグで二重join防止
+    const s = socketRef.current;
     let joined = false;
 
     const doJoin = () => {
       if (joined) return;
       joined = true;
-      setMyId(socket.id);
+      setMyId(s.id);
       setConnected(true);
-      socket.emit("teleport:join", { nickname });
+      s.emit("teleport:join", { nickname });
     };
 
     const onConnect = () => doJoin();
 
-    if (socket.connected) {
+    if (s.connected) {
       doJoin();
     } else {
-      socket.connect();
+      s.connect();
     }
 
-    socket.on("connect", onConnect);
+    s.on("connect", onConnect);
 
-    socket.on("teleport:lobby_update", (data: { players: typeof players }) => {
+    s.on("teleport:lobby_update", (data: { players: typeof players }) => {
       setPlayers(data.players);
     });
 
-    socket.on("teleport:timer_tick", (data: { remaining: number }) => {
+    s.on("teleport:timer_tick", (data: { remaining: number }) => {
       setRemaining(data.remaining);
     });
 
-    socket.on("teleport:phase", (data: {
+    s.on("teleport:phase", (data: {
       phase: Phase;
       styleCard?: StyleCard;
       timeLimit?: number;
@@ -131,16 +131,17 @@ export default function TeleportPage() {
       }
     });
 
-    socket.on("disconnect", () => setConnected(false));
+    s.on("disconnect", () => setConnected(false));
 
     return () => {
-      socket.off("connect", onConnect);
-      socket.off("teleport:lobby_update");
-      socket.off("teleport:timer_tick");
-      socket.off("teleport:phase");
-      // 注: destroySocket() はここで呼ばない（StrictModeで二重joinの原因になる）
+      s.off("connect", onConnect);
+      s.off("teleport:lobby_update");
+      s.off("teleport:timer_tick");
+      s.off("teleport:phase");
+      s.off("disconnect");
     };
-  }, [router, socket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   if (!connected) {
     return (

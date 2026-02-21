@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getSocket, destroySocket } from "@/lib/socket";
+import { getSocket } from "@/lib/socket";
 import Lobby from "@/components/Lobby";
 import DrawingCanvas from "@/components/DrawingCanvas";
 import ViewCanvas from "@/components/ViewCanvas";
@@ -38,17 +38,17 @@ export default function GamePage() {
   const [winner, setWinner] = useState("");
   const [connected, setConnected] = useState(false);
 
-  const socket = getSocket();
+  const socketRef = useRef(getSocket());
+  const socket = socketRef.current;
   const isDrawer = myId === drawerId;
 
   const handleStartGame = useCallback((mode: GameMode) => {
-    // 全モード共通: サーバーに mode 付きで emit → サーバーが全員をリダイレクト
-    socket.emit("start_game_mode", { mode });
-  }, [socket]);
+    socketRef.current.emit("start_game_mode", { mode });
+  }, []);
 
   const handleReturnToLobby = useCallback(() => {
-    socket.emit("return_to_lobby");
-  }, [socket]);
+    socketRef.current.emit("return_to_lobby");
+  }, []);
 
   useEffect(() => {
     const nickname = sessionStorage.getItem("nickname");
@@ -57,25 +57,38 @@ export default function GamePage() {
       return;
     }
 
-    socket.connect();
+    const s = socketRef.current;
+    let joined = false;
 
-    socket.on("connect", () => {
-      setMyId(socket.id);
+    const doJoin = () => {
+      if (joined) return;
+      joined = true;
+      setMyId(s.id);
       setConnected(true);
-      socket.emit("join", { nickname });
-    });
+      s.emit("join", { nickname });
+    };
 
-    socket.on("lobby_update", (data: LobbyUpdatePayload) => {
+    const onConnect = () => doJoin();
+
+    if (s.connected) {
+      doJoin();
+    } else {
+      s.connect();
+    }
+
+    s.on("connect", onConnect);
+
+    s.on("lobby_update", (data: LobbyUpdatePayload) => {
       setPlayers(data.players);
       setPhase((prev) => (prev === "game_end" ? "lobby" : prev));
     });
 
     // モード2/3選択時: サーバーからの全員リダイレクト
-    socket.on("redirect", ({ path }: { path: string }) => {
+    s.on("redirect", ({ path }: { path: string }) => {
       router.push(path);
     });
 
-    socket.on("game_start", (data: GameStartPayload) => {
+    s.on("game_start", (data: GameStartPayload) => {
       setPhase("playing");
       setRound(data.round);
       setTotalRounds(data.totalRounds);
@@ -85,40 +98,43 @@ export default function GamePage() {
       setWord(undefined);
     });
 
-    socket.on("your_word", (data: { word: string }) => {
+    s.on("your_word", (data: { word: string }) => {
       setWord(data.word);
     });
 
-    socket.on("timer_tick", (data: { remaining: number }) => {
+    s.on("timer_tick", (data: { remaining: number }) => {
       setRemaining(data.remaining);
     });
 
-    socket.on("round_end", (data: RoundEndPayload) => {
+    s.on("round_end", (data: RoundEndPayload) => {
       setPhase("round_end");
       setScores(data.scores);
       setRoundWord(data.word);
     });
 
-    socket.on("game_end", (data: GameEndPayload) => {
+    s.on("game_end", (data: GameEndPayload) => {
       setPhase("game_end");
       setFinalScores(data.finalScores);
       setWinner(data.winner);
     });
 
-    socket.on("disconnect", () => {
+    s.on("disconnect", () => {
       setConnected(false);
     });
 
-    socket.on("reconnect" as string, () => {
-      setMyId(socket.id);
-      setConnected(true);
-      socket.emit("join", { nickname });
-    });
-
     return () => {
-      destroySocket();
+      s.off("connect", onConnect);
+      s.off("lobby_update");
+      s.off("redirect");
+      s.off("game_start");
+      s.off("your_word");
+      s.off("timer_tick");
+      s.off("round_end");
+      s.off("game_end");
+      s.off("disconnect");
     };
-  }, [router, socket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   if (!connected) {
     return (

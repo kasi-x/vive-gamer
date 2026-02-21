@@ -316,6 +316,12 @@ function resetGame() {
 
 export function registerBattleHandlers(io: Server, socket: import("socket.io").Socket) {
   socket.on("join", ({ nickname }: { nickname: string }) => {
+    // 同じsocket.idの重複joinを無視
+    if (room.players.has(socket.id)) {
+      room.players.get(socket.id)!.connected = true;
+      broadcastLobby(io);
+      return;
+    }
     const player: Player = {
       id: socket.id,
       nickname,

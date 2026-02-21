@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getSocket, destroySocket } from "@/lib/socket";
+import { getSocket } from "@/lib/socket";
 import type { SketchSubject } from "@/types/game";
 
 type Phase = "lobby" | "show_incomplete" | "drawing" | "composite_reveal" | "voting" | "result" | "game_end";
@@ -215,33 +215,35 @@ export default function SketchPage() {
 
     let joined = false;
 
+    const s = socketRef.current;
+
     const doJoin = () => {
       if (joined) return;
       joined = true;
-      setMyId(socket.id);
+      setMyId(s.id);
       setConnected(true);
-      socket.emit("sketch:join", { nickname });
+      s.emit("sketch:join", { nickname });
     };
 
     const onConnect = () => doJoin();
 
-    if (socket.connected) {
+    if (s.connected) {
       doJoin();
     } else {
-      socket.connect();
+      s.connect();
     }
 
-    socket.on("connect", onConnect);
+    s.on("connect", onConnect);
 
-    socket.on("sketch:lobby_update", (data: { players: typeof players }) => {
+    s.on("sketch:lobby_update", (data: { players: typeof players }) => {
       setPlayers(data.players);
     });
 
-    socket.on("sketch:timer_tick", (data: { remaining: number }) => {
+    s.on("sketch:timer_tick", (data: { remaining: number }) => {
       setRemaining(data.remaining);
     });
 
-    socket.on("sketch:phase", (data: {
+    s.on("sketch:phase", (data: {
       phase: Phase;
       subject?: SketchSubject;
       round?: number;
@@ -278,29 +280,31 @@ export default function SketchPage() {
       }
     });
 
-    socket.on("disconnect", () => setConnected(false));
+    s.on("disconnect", () => setConnected(false));
 
     return () => {
-      socket.off("connect", onConnect);
-      socket.off("sketch:lobby_update");
-      socket.off("sketch:timer_tick");
-      socket.off("sketch:phase");
+      s.off("connect", onConnect);
+      s.off("sketch:lobby_update");
+      s.off("sketch:timer_tick");
+      s.off("sketch:phase");
+      s.off("disconnect");
     };
-  }, [router, socket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   const handleStartGame = useCallback(() => {
-    socket.emit("sketch:start_game");
-  }, [socket]);
+    socketRef.current.emit("sketch:start_game");
+  }, []);
 
   const handleVote = useCallback((targetPlayerId: string) => {
-    socket.emit("sketch:vote", { targetPlayerId });
+    socketRef.current.emit("sketch:vote", { targetPlayerId });
     setVotedFor(targetPlayerId);
-  }, [socket]);
+  }, []);
 
   const handleReturnToLobby = useCallback(() => {
-    socket.emit("sketch:return_to_lobby");
+    socketRef.current.emit("sketch:return_to_lobby");
     router.push("/game");
-  }, [socket, router]);
+  }, [router]);
 
   if (!connected) {
     return (
