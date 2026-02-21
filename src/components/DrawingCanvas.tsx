@@ -2,18 +2,12 @@
 
 import { useRef, useEffect, useCallback, useState } from "react";
 import type { Socket } from "socket.io-client";
+import InkGauge from "./InkGauge";
+import { soundManager } from "@/lib/sounds";
 
 const COLORS = [
-  "#000000",
-  "#ffffff",
-  "#e94560",
-  "#f97316",
-  "#fbbf24",
-  "#4ade80",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#78716c",
+  "#000000", "#ffffff", "#e94560", "#f97316", "#fbbf24",
+  "#4ade80", "#3b82f6", "#8b5cf6", "#ec4899", "#78716c",
 ];
 const WIDTHS = [3, 6, 12, 20];
 
@@ -31,8 +25,11 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
   const socketRef = useRef(socket);
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(6);
+  const [scanning, setScanning] = useState(false);
+  const [inkRemaining, setInkRemaining] = useState(15000);
+  const [maxInk] = useState(15000);
+  const [inkOut, setInkOut] = useState(false);
 
-  // Refsを最新のstate/propsと同期
   useEffect(() => { colorRef.current = color; }, [color]);
   useEffect(() => { widthRef.current = width; }, [width]);
   useEffect(() => { socketRef.current = socket; }, [socket]);
@@ -49,7 +46,6 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     []
   );
 
-  // キャンバス初期化 + イベントリスナー（一度だけ）
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -95,7 +91,6 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       canvas.setPointerCapture(e.pointerId);
       const pos = getCanvasPos(e);
       currentPoints.current = [pos];
-      // 点を即座に描画（タップだけでも見える）
       ctx.fillStyle = colorRef.current;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, widthRef.current / 2, 0, Math.PI * 2);
@@ -151,11 +146,8 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
       const imageBase64 = canvas.toDataURL("image/png");
       socketRef.current.emit("canvas_snapshot", { imageBase64 });
     }, 5000);
-
     return () => clearInterval(interval);
   }, []);
-
-  const [scanning, setScanning] = useState(false);
 
   // AIスキャンイベント受信
   useEffect(() => {
@@ -167,6 +159,23 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     return () => { socket.off("ai_scan", handleAIScan); };
   }, [socket]);
 
+  // インク更新
+  useEffect(() => {
+    const handleInkUpdate = (data: { inkRemaining: number; maxInk: number }) => {
+      setInkRemaining(data.inkRemaining);
+    };
+    const handleInkDepleted = () => {
+      setInkOut(true);
+      soundManager?.inkDepleted();
+    };
+    socket.on("ink_update", handleInkUpdate);
+    socket.on("ink_depleted", handleInkDepleted);
+    return () => {
+      socket.off("ink_update", handleInkUpdate);
+      socket.off("ink_depleted", handleInkDepleted);
+    };
+  }, [socket]);
+
   const handleClear = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -176,6 +185,8 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     socket.emit("clear_canvas");
   };
 
+  const inkLow = inkRemaining / maxInk <= 0.2;
+
   return (
     <div className="flex flex-col gap-2 sm:gap-3">
       <div className="relative overflow-hidden rounded-xl">
@@ -183,8 +194,14 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
           ref={canvasRef}
           width={800}
           height={600}
-          className="w-full border-2 border-[var(--surface-light)] cursor-crosshair bg-white touch-none rounded-xl"
-          style={{ aspectRatio: "4/3", touchAction: "none" }}
+          className={`w-full border-2 cursor-crosshair bg-white touch-none rounded-xl ${
+            inkOut
+              ? "border-[var(--accent)] cursor-not-allowed"
+              : inkLow
+              ? "border-[var(--warning)]"
+              : "border-[var(--surface-light)]"
+          }`}
+          style={{ aspectRatio: "4/3", touchAction: "none", pointerEvents: inkOut ? "none" : undefined }}
         />
         {scanning && (
           <div className="absolute inset-0 pointer-events-none rounded-xl overflow-hidden">
@@ -198,21 +215,31 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
             </div>
           </div>
         )}
+        {inkOut && (
+          <div className="ink-depleted-overlay">
+            <div className="bg-black/80 text-[var(--accent)] font-bold text-lg px-6 py-3 rounded-xl border border-[var(--accent)]/50">
+              INK DEPLETED
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ツールバー */}
-      <div className="flex items-center gap-2 sm:gap-4 bg-[var(--surface)] rounded-xl px-2 sm:px-4 py-2 flex-wrap">
+      <div className={`flex items-center gap-2 sm:gap-4 bg-[var(--surface)] rounded-xl px-2 sm:px-4 py-2 flex-wrap ${
+        inkLow && !inkOut ? "ring-1 ring-[var(--warning)]/50" : ""
+      }`}>
         {/* カラー */}
         <div className="flex gap-1 sm:gap-1.5 flex-wrap">
           {COLORS.map((c) => (
             <button
               key={c}
               onClick={() => setColor(c)}
+              disabled={inkOut}
               className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 transition ${
                 color === c
                   ? "border-[var(--accent)] scale-110"
                   : "border-transparent"
-              }`}
+              } ${inkOut ? "opacity-40" : ""}`}
               style={{ backgroundColor: c }}
             />
           ))}
@@ -224,18 +251,27 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
             <button
               key={w}
               onClick={() => setWidth(w)}
+              disabled={inkOut}
               className={`rounded-full bg-[var(--text)] transition ${
                 width === w ? "ring-2 ring-[var(--accent)]" : ""
-              }`}
+              } ${inkOut ? "opacity-40" : ""}`}
               style={{ width: w + 8, height: w + 8 }}
             />
           ))}
         </div>
 
+        {/* インクゲージ */}
+        <div className="border-l border-[var(--surface-light)] pl-2 sm:pl-4">
+          <InkGauge inkRemaining={inkRemaining} maxInk={maxInk} />
+        </div>
+
         {/* クリア */}
         <button
           onClick={handleClear}
-          className="ml-auto bg-[var(--surface-light)] hover:bg-[var(--accent)]/30 text-sm px-3 sm:px-4 py-1.5 rounded-lg transition"
+          disabled={inkOut}
+          className={`ml-auto bg-[var(--surface-light)] hover:bg-[var(--accent)]/30 text-sm px-3 sm:px-4 py-1.5 rounded-lg transition ${
+            inkOut ? "opacity-40 cursor-not-allowed" : ""
+          }`}
         >
           クリア
         </button>

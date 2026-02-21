@@ -2,17 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Socket } from "socket.io-client";
-import type { GuessMessage } from "@/types/game";
+import type { GuessMessage, CorrectGuessPayload } from "@/types/game";
+import { soundManager } from "@/lib/sounds";
+import { showScorePopup } from "./ScorePopup";
 
 interface GuessingPanelProps {
   socket: Socket;
-  disabled?: boolean; // 描き手の場合true
+  disabled?: boolean;
+  myNickname?: string;
 }
 
-export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) {
+export default function GuessingPanel({ socket, disabled, myNickname }: GuessingPanelProps) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<GuessMessage[]>([]);
   const [correctFlash, setCorrectFlash] = useState(false);
+  const [shaking, setShaking] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,23 +37,48 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
       ]);
     };
 
-    const handleCorrectGuess = (data: {
-      nickname: string;
-      isAI: boolean;
-    }) => {
+    const handleCorrectGuess = (data: CorrectGuessPayload) => {
+      const isMe = data.nickname === myNickname;
+
       setMessages((prev) => [
         ...prev,
         {
           nickname: data.nickname,
-          text: data.isAI ? "AI が正解してしまった..." : "正解！",
+          text: data.isAI
+            ? "AI が正解してしまった..."
+            : data.isFirstGuesser
+            ? `正解！ 1番乗り！ +${data.totalEarned}`
+            : `正解！ +${data.totalEarned}`,
           isCorrect: true,
           isAI: data.isAI,
           timestamp: Date.now(),
         },
       ]);
-      // 正解フラッシュ
+
       setCorrectFlash(true);
       setTimeout(() => setCorrectFlash(false), 600);
+
+      if (data.isAI) {
+        soundManager?.aiCorrect();
+      } else if (isMe) {
+        if (data.isFirstGuesser) {
+          soundManager?.firstGuess();
+        } else {
+          soundManager?.correct();
+        }
+        showScorePopup(`+${data.totalEarned}`,
+          data.comboMultiplier > 1 ? `x${data.comboMultiplier} コンボ!` : undefined
+        );
+        if (data.comboMultiplier > 1) {
+          soundManager?.combo();
+        }
+      }
+    };
+
+    const handleWrongGuess = () => {
+      soundManager?.wrong();
+      setShaking(true);
+      setTimeout(() => setShaking(false), 300);
     };
 
     const handleGameStart = () => {
@@ -58,14 +87,16 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
 
     socket.on("new_guess", handleNewGuess);
     socket.on("correct_guess", handleCorrectGuess);
+    socket.on("wrong_guess", handleWrongGuess);
     socket.on("game_start", handleGameStart);
 
     return () => {
       socket.off("new_guess", handleNewGuess);
       socket.off("correct_guess", handleCorrectGuess);
+      socket.off("wrong_guess", handleWrongGuess);
       socket.off("game_start", handleGameStart);
     };
-  }, [socket]);
+  }, [socket, myNickname]);
 
   useEffect(() => {
     if (feedRef.current) {
@@ -125,7 +156,7 @@ export default function GuessingPanel({ socket, disabled }: GuessingPanelProps) 
 
       {!disabled && (
         <form onSubmit={handleSubmit} className="p-2 sm:p-3 border-t border-[var(--surface-light)]">
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${shaking ? "animate-shake" : ""}`}>
             <input
               type="text"
               value={input}

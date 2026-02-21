@@ -3,12 +3,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
+import { soundManager } from "@/lib/sounds";
 import Lobby from "@/components/Lobby";
 import DrawingCanvas from "@/components/DrawingCanvas";
 import ViewCanvas from "@/components/ViewCanvas";
 import GuessingPanel from "@/components/GuessingPanel";
 import GameHeader from "@/components/GameHeader";
 import Scoreboard from "@/components/Scoreboard";
+import ConfettiOverlay from "@/components/ConfettiOverlay";
+import ScorePopup from "@/components/ScorePopup";
 import type { GameMode } from "@/components/ModeSelect";
 import type {
   GamePhase,
@@ -17,6 +20,7 @@ import type {
   RoundEndPayload,
   GameEndPayload,
   ScoreEntry,
+  CorrectGuessPayload,
 } from "@/types/game";
 
 export default function GamePage() {
@@ -26,6 +30,7 @@ export default function GamePage() {
     { id: string; nickname: string; score: number }[]
   >([]);
   const [myId, setMyId] = useState<string>();
+  const [myNickname, setMyNickname] = useState<string>();
   const [round, setRound] = useState(0);
   const [totalRounds, setTotalRounds] = useState(0);
   const [drawerId, setDrawerId] = useState("");
@@ -37,10 +42,14 @@ export default function GamePage() {
   const [finalScores, setFinalScores] = useState<ScoreEntry[]>([]);
   const [winner, setWinner] = useState("");
   const [connected, setConnected] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [showVignette, setShowVignette] = useState(false);
 
   const socketRef = useRef(getSocket());
   const socket = socketRef.current;
   const isDrawer = myId === drawerId;
+  const prevRemainingRef = useRef(60);
 
   const handleStartGame = useCallback((mode: GameMode) => {
     socketRef.current.emit("start_game_mode", { mode });
@@ -50,12 +59,18 @@ export default function GamePage() {
     socketRef.current.emit("return_to_lobby");
   }, []);
 
+  const handleToggleSound = useCallback(() => {
+    const enabled = soundManager?.toggle() ?? false;
+    setSoundEnabled(enabled);
+  }, []);
+
   useEffect(() => {
     const nickname = sessionStorage.getItem("nickname");
     if (!nickname) {
       router.push("/");
       return;
     }
+    setMyNickname(nickname);
 
     const s = socketRef.current;
     let joined = false;
@@ -83,7 +98,6 @@ export default function GamePage() {
       setPhase((prev) => (prev === "game_end" ? "lobby" : prev));
     });
 
-    // モード2/3選択時: サーバーからの全員リダイレクト
     s.on("redirect", ({ path }: { path: string }) => {
       router.push(path);
     });
@@ -96,6 +110,9 @@ export default function GamePage() {
       setDrawerNickname(data.drawerNickname);
       setRemaining(data.timeLimit);
       setWord(undefined);
+      setShowVignette(false);
+      prevRemainingRef.current = data.timeLimit;
+      soundManager?.roundStart();
     });
 
     s.on("your_word", (data: { word: string }) => {
@@ -104,18 +121,39 @@ export default function GamePage() {
 
     s.on("timer_tick", (data: { remaining: number }) => {
       setRemaining(data.remaining);
+      // タイマー危険域のサウンド
+      if (data.remaining <= 10 && data.remaining > 0 && data.remaining < prevRemainingRef.current) {
+        soundManager?.timerTick();
+      }
+      // ビネット表示
+      if (data.remaining <= 5) {
+        setShowVignette(true);
+      }
+      prevRemainingRef.current = data.remaining;
+    });
+
+    s.on("correct_guess", (data: CorrectGuessPayload) => {
+      if (!data.isAI && data.nickname === nickname) {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 2000);
+      }
     });
 
     s.on("round_end", (data: RoundEndPayload) => {
       setPhase("round_end");
       setScores(data.scores);
       setRoundWord(data.word);
+      setShowVignette(false);
     });
 
     s.on("game_end", (data: GameEndPayload) => {
       setPhase("game_end");
       setFinalScores(data.finalScores);
       setWinner(data.winner);
+      setShowVignette(false);
+      soundManager?.gameEnd();
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
     });
 
     s.on("disconnect", () => {
@@ -129,6 +167,7 @@ export default function GamePage() {
       s.off("game_start");
       s.off("your_word");
       s.off("timer_tick");
+      s.off("correct_guess");
       s.off("round_end");
       s.off("game_end");
       s.off("disconnect");
@@ -163,39 +202,50 @@ export default function GamePage() {
 
   if (phase === "game_end") {
     return (
-      <Scoreboard
-        scores={finalScores}
-        isGameEnd
-        winner={winner}
-        onReturnToLobby={handleReturnToLobby}
-      />
+      <>
+        <ConfettiOverlay active={showConfetti} />
+        <Scoreboard
+          scores={finalScores}
+          isGameEnd
+          winner={winner}
+          onReturnToLobby={handleReturnToLobby}
+        />
+      </>
     );
   }
 
   // playing phase
   return (
-    <div className="min-h-screen flex flex-col p-2 sm:p-3 gap-2 sm:gap-3 max-w-7xl mx-auto">
-      <GameHeader
-        round={round}
-        totalRounds={totalRounds}
-        drawerNickname={drawerNickname}
-        remaining={remaining}
-        word={isDrawer ? word : undefined}
-      />
+    <>
+      <ConfettiOverlay active={showConfetti} />
+      <ScorePopup />
+      {showVignette && <div className="vignette-overlay" />}
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-2 sm:gap-3 min-h-0">
-        <div className="min-h-0">
-          {isDrawer ? (
-            <DrawingCanvas socket={socket} />
-          ) : (
-            <ViewCanvas socket={socket} />
-          )}
-        </div>
+      <div className="min-h-screen flex flex-col p-2 sm:p-3 gap-2 sm:gap-3 max-w-7xl mx-auto">
+        <GameHeader
+          round={round}
+          totalRounds={totalRounds}
+          drawerNickname={drawerNickname}
+          remaining={remaining}
+          word={isDrawer ? word : undefined}
+          soundEnabled={soundEnabled}
+          onToggleSound={handleToggleSound}
+        />
 
-        <div className="min-h-0">
-          <GuessingPanel socket={socket} disabled={isDrawer} />
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-2 sm:gap-3 min-h-0">
+          <div className="min-h-0">
+            {isDrawer ? (
+              <DrawingCanvas socket={socket} />
+            ) : (
+              <ViewCanvas socket={socket} />
+            )}
+          </div>
+
+          <div className="min-h-0">
+            <GuessingPanel socket={socket} disabled={isDrawer} myNickname={myNickname} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

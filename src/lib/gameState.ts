@@ -5,7 +5,9 @@ import { guessFromImage } from "./geminiAI";
 import { getAIGuess as getMockGuess, AI_NICKNAME } from "./mockAI";
 
 const ROUND_TIME = 60;
-const AI_GUESS_INTERVAL = 8000; // AIは8秒ごとに推測
+const AI_GUESS_INTERVAL = 8000;
+const COMBO_MULTIPLIERS = [1.0, 1.5, 2.0, 2.5, 3.0];
+const MAX_INK = 15000;
 
 interface GameRoom {
   players: Map<string, Player>;
@@ -24,13 +26,18 @@ interface GameRoom {
   correctGuessers: Set<string>;
   aiGuessCount: number;
   aiCorrect: boolean;
-  aiGuessing: boolean; // API呼び出し中フラグ
+  aiGuessing: boolean;
   roundScoreDeltas: Map<string, number>;
+  roundScoreDetails: Map<string, { timeBonus: number; comboMultiplier: number; isFirstGuesser: boolean }>;
   strokeHistory: { points: { x: number; y: number }[]; color: string; width: number }[];
   latestSnapshot: string | null;
+  firstGuesserId: string | null;
+  // インク制限
+  inkRemaining: number;
+  strokesUsed: number;
+  inkDepleted: boolean;
 }
 
-// 単一ルームのゲーム状態
 const room: GameRoom = {
   players: new Map(),
   phase: "lobby",
@@ -50,8 +57,13 @@ const room: GameRoom = {
   aiCorrect: false,
   aiGuessing: false,
   roundScoreDeltas: new Map(),
+  roundScoreDetails: new Map(),
   strokeHistory: [],
   latestSnapshot: null,
+  firstGuesserId: null,
+  inkRemaining: MAX_INK,
+  strokesUsed: 0,
+  inkDepleted: false,
 };
 
 function getPlayerList() {
@@ -67,21 +79,22 @@ function broadcastLobby(io: Server) {
 }
 
 function clearTimers() {
-  if (room.timer) {
-    clearInterval(room.timer);
-    room.timer = null;
-  }
-  if (room.aiTimer) {
-    clearInterval(room.aiTimer);
-    room.aiTimer = null;
-  }
-  if (room.aiInitTimer) {
-    clearTimeout(room.aiInitTimer);
-    room.aiInitTimer = null;
-  }
+  if (room.timer) { clearInterval(room.timer); room.timer = null; }
+  if (room.aiTimer) { clearInterval(room.aiTimer); room.aiTimer = null; }
+  if (room.aiInitTimer) { clearTimeout(room.aiInitTimer); room.aiInitTimer = null; }
 }
 
 const normalize = (s: string) => s.trim().normalize("NFC");
+
+function calculateStrokeDistance(points: { x: number; y: number }[]): number {
+  let dist = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i - 1].x;
+    const dy = points[i].y - points[i - 1].y;
+    dist += Math.sqrt(dx * dx + dy * dy);
+  }
+  return dist;
+}
 
 function startRound(io: Server) {
   room.phase = "playing";
@@ -91,21 +104,23 @@ function startRound(io: Server) {
   room.aiCorrect = false;
   room.aiGuessing = false;
   room.roundScoreDeltas.clear();
+  room.roundScoreDetails.clear();
   room.strokeHistory = [];
   room.latestSnapshot = null;
+  room.firstGuesserId = null;
+  room.inkRemaining = MAX_INK;
+  room.strokesUsed = 0;
+  room.inkDepleted = false;
 
-  // 次の描き手を選択
   room.drawerId = room.drawerOrder[room.drawerIndex];
   room.drawerIndex++;
 
-  // お題を選択
   room.currentWord = pickRandomWord(room.usedWords);
   room.usedWords.push(room.currentWord);
 
   const drawer = room.players.get(room.drawerId);
   if (!drawer) return;
 
-  // ラウンド開始を全員に通知
   io.emit("game_start", {
     round: room.currentRound,
     totalRounds: room.totalRounds,
@@ -114,27 +129,29 @@ function startRound(io: Server) {
     timeLimit: ROUND_TIME,
   });
 
-  // 描き手にだけお題を送信
   io.to(room.drawerId).emit("your_word", { word: room.currentWord });
 
-  // タイマー開始
+  // インク初期状態を描き手に送信
+  io.to(room.drawerId).emit("ink_update", {
+    inkRemaining: room.inkRemaining,
+    maxInk: MAX_INK,
+    strokesUsed: room.strokesUsed,
+  });
+
   room.remaining = ROUND_TIME;
   room.timer = setInterval(() => {
     room.remaining--;
     io.emit("timer_tick", { remaining: room.remaining });
-
     if (room.remaining <= 0) {
       endRound(io);
     }
   }, 1000);
 
-  // AI推測タイマー開始（最初のスキャンは5秒後）
-  // スキャン演出(1.5秒) → 推測実行の順序
+  // AI推測タイマー
   const AI_SCAN_DURATION = 1500;
-
   const triggerAIScan = () => {
     if (room.phase !== "playing" || room.aiCorrect) return;
-    io.emit("ai_scan"); // クライアントにスキャン演出を通知
+    io.emit("ai_scan");
     setTimeout(() => doAIGuess(io), AI_SCAN_DURATION);
   };
 
@@ -142,10 +159,7 @@ function startRound(io: Server) {
     room.aiInitTimer = null;
     if (room.phase !== "playing") return;
     triggerAIScan();
-
-    room.aiTimer = setInterval(() => {
-      triggerAIScan();
-    }, AI_GUESS_INTERVAL);
+    room.aiTimer = setInterval(() => triggerAIScan(), AI_GUESS_INTERVAL);
   }, 5000);
 }
 
@@ -167,14 +181,19 @@ async function doAIGuess(io: Server) {
   room.aiGuessing = false;
   room.aiGuessCount++;
 
-  // 非同期処理中にラウンドが終わっていたら無視
   if (room.aiCorrect || room.phase !== "playing") return;
 
   if (result.isCorrect) {
     room.aiCorrect = true;
-    io.emit("correct_guess", { nickname: AI_NICKNAME, isAI: true });
+    io.emit("correct_guess", {
+      nickname: AI_NICKNAME,
+      isAI: true,
+      timeBonus: 0,
+      comboMultiplier: 1,
+      isFirstGuesser: false,
+      totalEarned: 0,
+    });
 
-    // AI正解ペナルティ: 描き手 -30
     if (room.drawerId) {
       const drawer = room.players.get(room.drawerId);
       if (drawer) {
@@ -205,21 +224,48 @@ function handleGuess(io: Server, playerId: string, text: string) {
   if (isCorrect) {
     room.correctGuessers.add(playerId);
 
-    // スコアリング
-    player.score += 100;
-    const prevGuesser = room.roundScoreDeltas.get(playerId) || 0;
-    room.roundScoreDeltas.set(playerId, prevGuesser + 100);
+    // 1番乗り判定
+    const isFirstGuesser = room.firstGuesserId === null;
+    if (isFirstGuesser) room.firstGuesserId = playerId;
 
+    // コンボ
+    player.comboCount++;
+    const comboIdx = Math.min(player.comboCount - 1, COMBO_MULTIPLIERS.length - 1);
+    const comboMultiplier = COMBO_MULTIPLIERS[comboIdx];
+
+    // タイムボーナス
+    const timeBonus = Math.round(100 * (room.remaining / ROUND_TIME));
+
+    // 1番乗りボーナス
+    const firstBonus = isFirstGuesser ? 50 : 0;
+
+    // 合計得点
+    const totalEarned = Math.round((100 + timeBonus + firstBonus) * comboMultiplier);
+
+    player.score += totalEarned;
+    const prevGuesser = room.roundScoreDeltas.get(playerId) || 0;
+    room.roundScoreDeltas.set(playerId, prevGuesser + totalEarned);
+    room.roundScoreDetails.set(playerId, { timeBonus, comboMultiplier, isFirstGuesser });
+
+    // 描き手ボーナス
     if (room.drawerId) {
       const drawer = room.players.get(room.drawerId);
       if (drawer) {
-        drawer.score += 50;
+        const drawerBonus = 50;
+        drawer.score += drawerBonus;
         const prevDrawer = room.roundScoreDeltas.get(room.drawerId) || 0;
-        room.roundScoreDeltas.set(room.drawerId, prevDrawer + 50);
+        room.roundScoreDeltas.set(room.drawerId, prevDrawer + drawerBonus);
       }
     }
 
-    io.emit("correct_guess", { nickname: player.nickname, isAI: false });
+    io.emit("correct_guess", {
+      nickname: player.nickname,
+      isAI: false,
+      timeBonus,
+      comboMultiplier,
+      isFirstGuesser,
+      totalEarned,
+    });
 
     // 全人間プレイヤーが正解したらラウンド終了
     const guessers = Array.from(room.players.values()).filter(
@@ -234,11 +280,13 @@ function handleGuess(io: Server, playerId: string, text: string) {
       text,
       isAI: false,
     });
+    // 不正解フィードバックを送信者のみに
+    io.to(playerId).emit("wrong_guess");
   }
 }
 
 function endRound(io: Server) {
-  if (room.phase !== "playing") return; // 再入防止
+  if (room.phase !== "playing") return;
   clearTimers();
   room.phase = "round_end";
 
@@ -246,24 +294,40 @@ function endRound(io: Server) {
   if (!room.aiCorrect && room.drawerId) {
     const drawer = room.players.get(room.drawerId);
     if (drawer) {
-      drawer.score += 100;
+      // インク効率ボーナス
+      const inkUsed = MAX_INK - room.inkRemaining;
+      const efficiencyMultiplier = 1 + (1 - inkUsed / MAX_INK);
+      const aiBonus = Math.round(100 * efficiencyMultiplier);
+      drawer.score += aiBonus;
       const prev = room.roundScoreDeltas.get(room.drawerId) || 0;
-      room.roundScoreDeltas.set(room.drawerId, prev + 100);
+      room.roundScoreDeltas.set(room.drawerId, prev + aiBonus);
     }
   }
 
-  const scores: ScoreEntry[] = Array.from(room.players.values()).map((p) => ({
-    nickname: p.nickname,
-    score: p.score,
-    roundDelta: room.roundScoreDeltas.get(p.id) || 0,
-  }));
+  // 不正解者のコンボリセット
+  for (const [id, player] of room.players) {
+    if (id !== room.drawerId && !room.correctGuessers.has(id)) {
+      player.comboCount = 0;
+    }
+  }
+
+  const scores: ScoreEntry[] = Array.from(room.players.values()).map((p) => {
+    const details = room.roundScoreDetails.get(p.id);
+    return {
+      nickname: p.nickname,
+      score: p.score,
+      roundDelta: room.roundScoreDeltas.get(p.id) || 0,
+      timeBonus: details?.timeBonus,
+      comboMultiplier: details?.comboMultiplier,
+      isFirstGuesser: details?.isFirstGuesser,
+    };
+  });
 
   io.emit("round_end", {
     word: room.currentWord,
     scores: scores.sort((a, b) => b.score - a.score),
   });
 
-  // 全員が描き終わったか確認
   if (room.drawerIndex >= room.drawerOrder.length) {
     setTimeout(() => endGame(io), 4000);
   } else {
@@ -275,11 +339,7 @@ function endGame(io: Server) {
   room.phase = "game_end";
 
   const finalScores: ScoreEntry[] = Array.from(room.players.values())
-    .map((p) => ({
-      nickname: p.nickname,
-      score: p.score,
-      roundDelta: 0,
-    }))
+    .map((p) => ({ nickname: p.nickname, score: p.score, roundDelta: 0 }))
     .sort((a, b) => b.score - a.score);
 
   io.emit("game_end", {
@@ -304,19 +364,23 @@ function resetGame() {
   room.aiCorrect = false;
   room.aiGuessing = false;
   room.roundScoreDeltas.clear();
+  room.roundScoreDetails.clear();
   room.strokeHistory = [];
   room.latestSnapshot = null;
+  room.firstGuesserId = null;
+  room.inkRemaining = MAX_INK;
+  room.strokesUsed = 0;
+  room.inkDepleted = false;
 
-  // スコアリセット
   for (const player of room.players.values()) {
     player.score = 0;
     player.hasDrawn = false;
+    player.comboCount = 0;
   }
 }
 
 export function registerBattleHandlers(io: Server, socket: import("socket.io").Socket) {
   socket.on("join", ({ nickname }: { nickname: string }) => {
-    // 同じsocket.idの重複joinを無視
     if (room.players.has(socket.id)) {
       room.players.get(socket.id)!.connected = true;
       broadcastLobby(io);
@@ -328,11 +392,11 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
       score: 0,
       hasDrawn: false,
       connected: true,
+      comboCount: 0,
     };
     room.players.set(socket.id, player);
     broadcastLobby(io);
 
-    // プレイ中に参加した場合、キャンバス状態を送信
     if (room.phase === "playing" && room.strokeHistory.length > 0) {
       socket.emit("canvas_state", { strokes: room.strokeHistory });
     }
@@ -340,7 +404,6 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
     console.log(`[バトル] 参加: ${nickname} (${socket.id})`);
   });
 
-  // モード付きゲーム開始 → 全員を該当ページへリダイレクト
   socket.on("start_game_mode", ({ mode }: { mode: string }) => {
     if (room.phase !== "lobby") return;
     if (room.players.size < 2) return;
@@ -352,10 +415,13 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
       room.totalRounds = room.drawerOrder.length;
       startRound(io);
     } else {
-      // モード2/3: 全プレイヤーをリダイレクト後、ロビーをリセット
-      const path = mode === "teleport" ? "/game/teleport" : "/game/sketch";
+      const pathMap: Record<string, string> = {
+        teleport: "/game/teleport",
+        sketch: "/game/sketch",
+        ojama: "/game/ojama",
+      };
+      const path = pathMap[mode] || "/game/teleport";
       io.emit("redirect", { path });
-      // リダイレクト配信後にクリア（disconnectハンドラーとのレース回避）
       setTimeout(() => { room.players.clear(); }, 500);
     }
   });
@@ -363,20 +429,36 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
   socket.on("start_game", () => {
     if (room.phase !== "lobby") return;
     if (room.players.size < 2) return;
-
     resetGame();
-
-    // 描き手の順番をシャッフル
     const playerIds = Array.from(room.players.keys());
     room.drawerOrder = playerIds.sort(() => Math.random() - 0.5);
     room.totalRounds = room.drawerOrder.length;
-
     startRound(io);
   });
 
   socket.on("draw", (data: { points: { x: number; y: number }[]; color: string; width: number }) => {
     if (room.phase !== "playing") return;
     if (socket.id !== room.drawerId) return;
+    if (room.inkDepleted) return;
+
+    // インク消費計算
+    const dist = calculateStrokeDistance(data.points);
+    room.inkRemaining -= dist;
+    room.strokesUsed++;
+
+    if (room.inkRemaining <= 0) {
+      room.inkRemaining = 0;
+      room.inkDepleted = true;
+      socket.emit("ink_depleted");
+    }
+
+    // インク状態を描き手に送信
+    socket.emit("ink_update", {
+      inkRemaining: room.inkRemaining,
+      maxInk: MAX_INK,
+      strokesUsed: room.strokesUsed,
+    });
+
     room.strokeHistory.push(data);
     socket.broadcast.emit("draw", data);
   });
@@ -385,6 +467,7 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
     if (room.phase !== "playing") return;
     if (socket.id !== room.drawerId) return;
     room.strokeHistory = [];
+    // クリアしてもインクは回復しない
     socket.broadcast.emit("clear_canvas");
   });
 
@@ -410,14 +493,10 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
     if (player) {
       console.log(`[バトル] 切断: ${player.nickname}`);
       player.connected = false;
-
-      // ロビー中なら削除
       if (room.phase === "lobby") {
         room.players.delete(socket.id);
       }
       broadcastLobby(io);
-
-      // 描き手が切断したらラウンド終了
       if (room.phase === "playing" && socket.id === room.drawerId) {
         endRound(io);
       }

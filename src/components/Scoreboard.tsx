@@ -27,7 +27,7 @@ export default function Scoreboard({
             <>
               <h2 className="text-3xl sm:text-4xl font-bold mb-2">ゲーム終了！</h2>
               <p className="text-xl sm:text-2xl text-[var(--warning)]">
-                🏆 {winner} の勝利！
+                {winner} の勝利！
               </p>
             </>
           ) : (
@@ -56,7 +56,26 @@ export default function Scoreboard({
               <span className="text-lg font-bold text-[var(--text-dim)] w-8">
                 {i + 1}.
               </span>
-              <span className="flex-1 font-medium">{entry.nickname}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{entry.nickname}</span>
+                  {entry.isFirstGuesser && !isGameEnd && (
+                    <span className="text-xs bg-[var(--warning)]/20 text-[var(--warning)] px-1.5 py-0.5 rounded font-bold">
+                      1st
+                    </span>
+                  )}
+                  {entry.comboMultiplier && entry.comboMultiplier > 1 && !isGameEnd && (
+                    <span className="text-xs bg-[var(--accent)]/20 text-[var(--accent)] px-1.5 py-0.5 rounded font-bold animate-combo-flash">
+                      x{entry.comboMultiplier}
+                    </span>
+                  )}
+                </div>
+                {entry.timeBonus !== undefined && entry.timeBonus > 0 && !isGameEnd && (
+                  <div className="text-xs text-[var(--text-dim)] mt-0.5">
+                    時間ボーナス +{entry.timeBonus}
+                  </div>
+                )}
+              </div>
               {entry.roundDelta !== 0 && !isGameEnd && (
                 <span
                   className={`text-sm font-bold animate-score-pop ${

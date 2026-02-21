@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import { registerBattleHandlers } from "./src/lib/gameState";
 import { registerTeleportHandlers } from "./src/lib/teleportState";
 import { registerSketchHandlers } from "./src/lib/sketchState";
+import { registerOjamaHandlers } from "./src/lib/ojamaState";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
@@ -21,13 +22,13 @@ app.prepare().then(() => {
     cors: { origin: "*" },
   });
 
-  // 単一のconnectionハンドラーで全モードのイベントを登録
   io.on("connection", (socket) => {
     console.log(`接続: ${socket.id}`);
 
     registerBattleHandlers(io, socket);
     registerTeleportHandlers(io, socket);
     registerSketchHandlers(io, socket);
+    registerOjamaHandlers(io, socket);
   });
 
   httpServer.listen(port, () => {

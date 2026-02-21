@@ -1,6 +1,6 @@
 "use client";
 
-type GameMode = "battle" | "teleport" | "sketch";
+type GameMode = "battle" | "teleport" | "sketch" | "ojama";
 
 interface ModeSelectProps {
   selectedMode: GameMode;
@@ -28,6 +28,13 @@ const MODES: { id: GameMode; title: string; subtitle: string; description: strin
     subtitle: "モード③",
     description: "不完全な画像を全員で同時に完成させよう",
     icon: "✏️",
+  },
+  {
+    id: "ojama",
+    title: "おじゃまバトル",
+    subtitle: "モード④",
+    description: "穴埋めクイズ対戦！正解でおじゃまインク発射",
+    icon: "💥",
   },
 ];
 

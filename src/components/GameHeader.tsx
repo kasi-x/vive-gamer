@@ -1,13 +1,16 @@
 "use client";
 
 import Timer from "./Timer";
+import { soundManager } from "@/lib/sounds";
 
 interface GameHeaderProps {
   round: number;
   totalRounds: number;
   drawerNickname: string;
   remaining: number;
-  word?: string; // 描き手にのみ表示
+  word?: string;
+  soundEnabled: boolean;
+  onToggleSound: () => void;
 }
 
 export default function GameHeader({
@@ -16,6 +19,8 @@ export default function GameHeader({
   drawerNickname,
   remaining,
   word,
+  soundEnabled,
+  onToggleSound,
 }: GameHeaderProps) {
   return (
     <div className="bg-[var(--surface)] rounded-xl px-3 py-2 sm:px-6 sm:py-3 flex items-center justify-between gap-2 sm:gap-4">
@@ -44,7 +49,16 @@ export default function GameHeader({
         )}
       </div>
 
-      <Timer remaining={remaining} />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onToggleSound}
+          className="text-lg opacity-60 hover:opacity-100 transition"
+          title={soundEnabled ? "サウンドOFF" : "サウンドON"}
+        >
+          {soundEnabled ? "🔊" : "🔇"}
+        </button>
+        <Timer remaining={remaining} />
+      </div>
     </div>
   );
 }

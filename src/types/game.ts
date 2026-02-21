@@ -6,6 +6,7 @@ export interface Player {
   score: number;
   hasDrawn: boolean;
   connected: boolean;
+  comboCount: number;
 }
 
 export interface Stroke {
@@ -36,6 +37,18 @@ export interface ScoreEntry {
   nickname: string;
   score: number;
   roundDelta: number;
+  timeBonus?: number;
+  comboMultiplier?: number;
+  isFirstGuesser?: boolean;
+}
+
+export interface CorrectGuessPayload {
+  nickname: string;
+  isAI: boolean;
+  timeBonus: number;
+  comboMultiplier: number;
+  isFirstGuesser: boolean;
+  totalEarned: number;
 }
 
 // Socket event payloads
