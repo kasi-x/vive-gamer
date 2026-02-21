@@ -330,8 +330,8 @@ export function registerBattleHandlers(io: Server, socket: import("socket.io").S
       // モード2/3: 全プレイヤーをリダイレクト後、ロビーをリセット
       const path = mode === "teleport" ? "/game/teleport" : "/game/sketch";
       io.emit("redirect", { path });
-      // バトルルームのプレイヤーをクリア（別モードに移行するため）
-      room.players.clear();
+      // リダイレクト配信後にクリア（disconnectハンドラーとのレース回避）
+      setTimeout(() => { room.players.clear(); }, 500);
     }
   });
 

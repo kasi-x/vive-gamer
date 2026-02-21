@@ -67,22 +67,23 @@ export default function TeleportPage() {
       return;
     }
 
-    // ソケットが既に接続中なら再利用、でなければ接続
-    if (!socket.connected) {
-      socket.connect();
-    }
+    // join済みフラグで二重join防止
+    let joined = false;
 
-    const onConnect = () => {
+    const doJoin = () => {
+      if (joined) return;
+      joined = true;
       setMyId(socket.id);
       setConnected(true);
       socket.emit("teleport:join", { nickname });
     };
 
-    // 既に接続済みの場合（/game から遷移してきた場合）
+    const onConnect = () => doJoin();
+
     if (socket.connected) {
-      setMyId(socket.id);
-      setConnected(true);
-      socket.emit("teleport:join", { nickname });
+      doJoin();
+    } else {
+      socket.connect();
     }
 
     socket.on("connect", onConnect);
@@ -133,13 +134,11 @@ export default function TeleportPage() {
     socket.on("disconnect", () => setConnected(false));
 
     return () => {
-      // teleportイベントだけ解除（ソケット自体は破棄しない）
       socket.off("connect", onConnect);
       socket.off("teleport:lobby_update");
       socket.off("teleport:timer_tick");
       socket.off("teleport:phase");
-      socket.off("disconnect");
-      destroySocket();
+      // 注: destroySocket() はここで呼ばない（StrictModeで二重joinの原因になる）
     };
   }, [router, socket]);
 

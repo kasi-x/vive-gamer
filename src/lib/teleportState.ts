@@ -54,8 +54,10 @@ function getPlayerList() {
   }));
 }
 
+const TELEPORT_ROOM = "mode:teleport";
+
 function broadcastLobby(io: Server) {
-  io.emit("teleport:lobby_update", { players: getPlayerList() });
+  io.to(TELEPORT_ROOM).emit("teleport:lobby_update", { players: getPlayerList() });
 }
 
 function clearTimer() {
@@ -68,11 +70,11 @@ function clearTimer() {
 function startCountdown(io: Server, seconds: number, onEnd: () => void) {
   clearTimer();
   room.remaining = seconds;
-  io.emit("teleport:timer_tick", { remaining: room.remaining });
+  io.to(TELEPORT_ROOM).emit("teleport:timer_tick", { remaining: room.remaining });
 
   room.timer = setInterval(() => {
     room.remaining--;
-    io.emit("teleport:timer_tick", { remaining: room.remaining });
+    io.to(TELEPORT_ROOM).emit("teleport:timer_tick", { remaining: room.remaining });
     if (room.remaining <= 0) {
       clearTimer();
       onEnd();
@@ -89,14 +91,12 @@ function assignStyleCards() {
 }
 
 function buildChainOrder() {
-  // プレイヤーIDをシャッフルして回し順を作成
   // chainOrder[i] が playerIds[i] のプロンプトを説明する
+  // 単純に1つずらすことで自分自身を説明しないことを保証
   const ids = Array.from(room.players.keys());
-  const shuffled = [...ids].sort(() => Math.random() - 0.5);
-  // 自分自身を説明しないようにずらす
   room.chainOrder = [];
   for (let i = 0; i < ids.length; i++) {
-    room.chainOrder.push(shuffled[(i + 1) % shuffled.length]);
+    room.chainOrder.push(ids[(i + 1) % ids.length]);
   }
 }
 
@@ -138,7 +138,7 @@ function startAIGenerating1(io: Server) {
     room.mockImages1.set(id, generateMockImage(prompt, style));
   }
 
-  io.emit("teleport:phase", { phase: "ai_generating", timeLimit: AI_GEN_TIME });
+  io.to(TELEPORT_ROOM).emit("teleport:phase", { phase: "ai_generating", timeLimit: AI_GEN_TIME });
 
   setTimeout(() => startDescribe(io), AI_GEN_TIME * 1000);
 }
@@ -185,7 +185,7 @@ function startAIGenerating2(io: Server) {
     room.mockImages2.set(describerId, generateMockImage(desc));
   }
 
-  io.emit("teleport:phase", { phase: "ai_generating_2", timeLimit: AI_GEN_TIME });
+  io.to(TELEPORT_ROOM).emit("teleport:phase", { phase: "ai_generating_2", timeLimit: AI_GEN_TIME });
 
   setTimeout(() => startReveal(io), AI_GEN_TIME * 1000);
 }
@@ -214,7 +214,7 @@ function startReveal(io: Server) {
     });
   }
 
-  io.emit("teleport:phase", {
+  io.to(TELEPORT_ROOM).emit("teleport:phase", {
     phase: "reveal",
     chains: room.chains,
   });
@@ -222,7 +222,7 @@ function startReveal(io: Server) {
 
 function startVoting(io: Server) {
   room.phase = "voting";
-  io.emit("teleport:phase", {
+  io.to(TELEPORT_ROOM).emit("teleport:phase", {
     phase: "voting",
     chains: room.chains,
   });
@@ -249,7 +249,7 @@ function tallyVotes(io: Server) {
     .map((p) => ({ nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
-  io.emit("teleport:phase", {
+  io.to(TELEPORT_ROOM).emit("teleport:phase", {
     phase: "result",
     scores,
     voteCounts: Object.fromEntries(voteCounts),
@@ -274,6 +274,7 @@ function resetGame() {
 
 export function registerTeleportHandlers(io: Server, socket: import("socket.io").Socket) {
   socket.on("teleport:join", ({ nickname }: { nickname: string }) => {
+    socket.join(TELEPORT_ROOM);
     room.players.set(socket.id, {
       id: socket.id,
       nickname,
@@ -296,7 +297,8 @@ export function registerTeleportHandlers(io: Server, socket: import("socket.io")
     if (room.phase !== "prompt_write") return;
     room.prompts.set(socket.id, prompt.trim() || "不思議な風景");
 
-    if (room.prompts.size >= room.players.size) {
+    const connectedCount = Array.from(room.players.values()).filter(p => p.connected).length;
+    if (room.prompts.size >= connectedCount) {
       clearTimer();
       startAIGenerating1(io);
     }
@@ -306,7 +308,8 @@ export function registerTeleportHandlers(io: Server, socket: import("socket.io")
     if (room.phase !== "describe") return;
     room.descriptions.set(socket.id, description.trim() || "よくわからない画像");
 
-    if (room.descriptions.size >= room.players.size) {
+    const connectedCount = Array.from(room.players.values()).filter(p => p.connected).length;
+    if (room.descriptions.size >= connectedCount) {
       clearTimer();
       startAIGenerating2(io);
     }
@@ -314,6 +317,7 @@ export function registerTeleportHandlers(io: Server, socket: import("socket.io")
 
   socket.on("teleport:start_voting", () => {
     if (room.phase !== "reveal") return;
+    room.phase = "voting"; // 即座にフェーズ変更して二重発火防止
     startVoting(io);
   });
 
@@ -322,7 +326,8 @@ export function registerTeleportHandlers(io: Server, socket: import("socket.io")
     if (chainOwnerId === socket.id) return;
     room.votes.set(socket.id, chainOwnerId);
 
-    if (room.votes.size >= room.players.size) {
+    const connectedCount = Array.from(room.players.values()).filter(p => p.connected).length;
+    if (room.votes.size >= connectedCount) {
       tallyVotes(io);
     }
   });

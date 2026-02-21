@@ -54,8 +54,10 @@ function getPlayerList() {
   }));
 }
 
+const SKETCH_ROOM = "mode:sketch";
+
 function broadcastLobby(io: Server) {
-  io.emit("sketch:lobby_update", { players: getPlayerList() });
+  io.to(SKETCH_ROOM).emit("sketch:lobby_update", { players: getPlayerList() });
 }
 
 function clearTimers() {
@@ -80,11 +82,11 @@ function pickSubject(): SketchSubject {
 function startCountdown(io: Server, seconds: number, onEnd: () => void) {
   clearTimers();
   room.remaining = seconds;
-  io.emit("sketch:timer_tick", { remaining: room.remaining });
+  io.to(SKETCH_ROOM).emit("sketch:timer_tick", { remaining: room.remaining });
 
   room.timer = setInterval(() => {
     room.remaining--;
-    io.emit("sketch:timer_tick", { remaining: room.remaining });
+    io.to(SKETCH_ROOM).emit("sketch:timer_tick", { remaining: room.remaining });
     if (room.remaining <= 0) {
       clearTimers();
       onEnd();
@@ -111,7 +113,7 @@ function startRound(io: Server) {
 function showIncomplete(io: Server) {
   room.phase = "show_incomplete";
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "show_incomplete",
     subject: room.currentSubject,
     round: room.currentRound,
@@ -125,7 +127,7 @@ function showIncomplete(io: Server) {
 function startDrawing(io: Server) {
   room.phase = "drawing";
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "drawing",
     subject: room.currentSubject,
     round: room.currentRound,
@@ -133,11 +135,7 @@ function startDrawing(io: Server) {
     timeLimit: DRAW_TIME,
   });
 
-  // 15秒ごとに全ストロークを合成ブロードキャスト
-  room.compositeTimer = setInterval(() => {
-    broadcastComposite(io);
-  }, COMPOSITE_INTERVAL * 1000);
-
+  // startCountdown が clearTimers() を呼ぶので、先にカウントダウンを開始
   startCountdown(io, DRAW_TIME, () => {
     if (room.compositeTimer) {
       clearInterval(room.compositeTimer);
@@ -145,6 +143,11 @@ function startDrawing(io: Server) {
     }
     showCompositeReveal(io);
   });
+
+  // 15秒ごとに全ストロークを合成ブロードキャスト（startCountdown の後に設定）
+  room.compositeTimer = setInterval(() => {
+    broadcastComposite(io);
+  }, COMPOSITE_INTERVAL * 1000);
 }
 
 function broadcastComposite(io: Server) {
@@ -155,7 +158,7 @@ function broadcastComposite(io: Server) {
     allStrokes.push({ playerId: id, strokes });
   }
 
-  io.emit("sketch:composite", { allStrokes });
+  io.to(SKETCH_ROOM).emit("sketch:composite", { allStrokes });
 }
 
 function showCompositeReveal(io: Server) {
@@ -172,7 +175,7 @@ function showCompositeReveal(io: Server) {
     });
   }
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "composite_reveal",
     allStrokes,
     subject: room.currentSubject,
@@ -193,7 +196,7 @@ function startVoting(io: Server) {
     nickname: p.nickname,
   }));
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "voting",
     players: playerList,
     round: room.currentRound,
@@ -221,7 +224,7 @@ function tallyVotes(io: Server) {
     .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "result",
     scores,
     voteCounts: Object.fromEntries(voteCounts),
@@ -244,7 +247,7 @@ function endGame(io: Server) {
     .map((p) => ({ nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
-  io.emit("sketch:phase", {
+  io.to(SKETCH_ROOM).emit("sketch:phase", {
     phase: "game_end",
     finalScores,
     winner: finalScores[0]?.nickname || "",
@@ -267,6 +270,7 @@ function resetGame() {
 
 export function registerSketchHandlers(io: Server, socket: import("socket.io").Socket) {
   socket.on("sketch:join", ({ nickname }: { nickname: string }) => {
+    socket.join(SKETCH_ROOM);
     room.players.set(socket.id, {
       id: socket.id,
       nickname,
@@ -298,7 +302,8 @@ export function registerSketchHandlers(io: Server, socket: import("socket.io").S
     if (targetPlayerId === socket.id) return;
     room.votes.set(socket.id, targetPlayerId);
 
-    if (room.votes.size >= room.players.size) {
+    const connectedCount = Array.from(room.players.values()).filter(p => p.connected).length;
+    if (room.votes.size >= connectedCount) {
       tallyVotes(io);
     }
   });

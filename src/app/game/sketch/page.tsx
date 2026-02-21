@@ -213,20 +213,22 @@ export default function SketchPage() {
       return;
     }
 
-    if (!socket.connected) {
-      socket.connect();
-    }
+    let joined = false;
 
-    const onConnect = () => {
+    const doJoin = () => {
+      if (joined) return;
+      joined = true;
       setMyId(socket.id);
       setConnected(true);
       socket.emit("sketch:join", { nickname });
     };
 
+    const onConnect = () => doJoin();
+
     if (socket.connected) {
-      setMyId(socket.id);
-      setConnected(true);
-      socket.emit("sketch:join", { nickname });
+      doJoin();
+    } else {
+      socket.connect();
     }
 
     socket.on("connect", onConnect);
@@ -283,8 +285,6 @@ export default function SketchPage() {
       socket.off("sketch:lobby_update");
       socket.off("sketch:timer_tick");
       socket.off("sketch:phase");
-      socket.off("disconnect");
-      destroySocket();
     };
   }, [router, socket]);
 
