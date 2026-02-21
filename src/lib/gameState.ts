@@ -24,6 +24,7 @@ interface GameRoom {
   correctGuessers: Set<string>;
   aiGuessCount: number;
   aiCorrect: boolean;
+  aiGuessing: boolean; // API呼び出し中フラグ
   roundScoreDeltas: Map<string, number>;
   strokeHistory: { points: { x: number; y: number }[]; color: string; width: number }[];
   latestSnapshot: string | null;
@@ -47,6 +48,7 @@ const room: GameRoom = {
   correctGuessers: new Set(),
   aiGuessCount: 0,
   aiCorrect: false,
+  aiGuessing: false,
   roundScoreDeltas: new Map(),
   strokeHistory: [],
   latestSnapshot: null,
@@ -87,6 +89,7 @@ function startRound(io: Server) {
   room.correctGuessers.clear();
   room.aiGuessCount = 0;
   room.aiCorrect = false;
+  room.aiGuessing = false;
   room.roundScoreDeltas.clear();
   room.strokeHistory = [];
   room.latestSnapshot = null;
@@ -139,14 +142,21 @@ function startRound(io: Server) {
 }
 
 async function doAIGuess(io: Server) {
-  if (room.aiCorrect || room.phase !== "playing") return;
+  if (room.aiCorrect || room.phase !== "playing" || room.aiGuessing) return;
+  room.aiGuessing = true;
 
   let result;
-  if (room.latestSnapshot) {
-    result = await guessFromImage(room.latestSnapshot, room.currentWord, room.aiGuessCount);
-  } else {
-    result = getMockGuess(room.currentWord, room.aiGuessCount);
+  try {
+    if (room.latestSnapshot) {
+      result = await guessFromImage(room.latestSnapshot, room.currentWord, room.aiGuessCount);
+    } else {
+      result = getMockGuess(room.currentWord, room.aiGuessCount);
+    }
+  } catch {
+    room.aiGuessing = false;
+    return;
   }
+  room.aiGuessing = false;
   room.aiGuessCount++;
 
   // 非同期処理中にラウンドが終わっていたら無視
@@ -284,6 +294,7 @@ function resetGame() {
   room.correctGuessers.clear();
   room.aiGuessCount = 0;
   room.aiCorrect = false;
+  room.aiGuessing = false;
   room.roundScoreDeltas.clear();
   room.strokeHistory = [];
   room.latestSnapshot = null;

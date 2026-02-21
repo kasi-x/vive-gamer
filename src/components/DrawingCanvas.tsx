@@ -135,6 +135,18 @@ export default function DrawingCanvas({ socket }: DrawingCanvasProps) {
     };
   }, [getCanvasPos]);
 
+  // 5秒ごとにキャンバスのスナップショットをサーバーに送信
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const imageBase64 = canvas.toDataURL("image/png");
+      socketRef.current.emit("canvas_snapshot", { imageBase64 });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const handleClear = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
