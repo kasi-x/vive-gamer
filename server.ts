@@ -1,7 +1,9 @@
 import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
-import { setupSocketHandlers } from "./src/lib/gameState";
+import { registerBattleHandlers } from "./src/lib/gameState";
+import { registerTeleportHandlers } from "./src/lib/teleportState";
+import { registerSketchHandlers } from "./src/lib/sketchState";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
@@ -19,7 +21,14 @@ app.prepare().then(() => {
     cors: { origin: "*" },
   });
 
-  setupSocketHandlers(io);
+  // 単一のconnectionハンドラーで全モードのイベントを登録
+  io.on("connection", (socket) => {
+    console.log(`接続: ${socket.id}`);
+
+    registerBattleHandlers(io, socket);
+    registerTeleportHandlers(io, socket);
+    registerSketchHandlers(io, socket);
+  });
 
   httpServer.listen(port, () => {
     console.log(`> Vive Gamer running on http://${hostname}:${port}`);

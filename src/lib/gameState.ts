@@ -1,7 +1,8 @@
 import type { Server } from "socket.io";
 import type { Player, ScoreEntry } from "../types/game";
 import { pickRandomWord } from "./words";
-import { getAIGuess, AI_NICKNAME } from "./mockAI";
+import { guessFromImage } from "./geminiAI";
+import { getAIGuess as getMockGuess, AI_NICKNAME } from "./mockAI";
 
 const ROUND_TIME = 60;
 const AI_GUESS_INTERVAL = 8000; // AIは8秒ごとに推測
@@ -25,6 +26,7 @@ interface GameRoom {
   aiCorrect: boolean;
   roundScoreDeltas: Map<string, number>;
   strokeHistory: { points: { x: number; y: number }[]; color: string; width: number }[];
+  latestSnapshot: string | null;
 }
 
 // 単一ルームのゲーム状態
@@ -47,6 +49,7 @@ const room: GameRoom = {
   aiCorrect: false,
   roundScoreDeltas: new Map(),
   strokeHistory: [],
+  latestSnapshot: null,
 };
 
 function getPlayerList() {
@@ -86,6 +89,7 @@ function startRound(io: Server) {
   room.aiCorrect = false;
   room.roundScoreDeltas.clear();
   room.strokeHistory = [];
+  room.latestSnapshot = null;
 
   // 次の描き手を選択
   room.drawerId = room.drawerOrder[room.drawerIndex];
@@ -134,11 +138,19 @@ function startRound(io: Server) {
   }, 5000);
 }
 
-function doAIGuess(io: Server) {
+async function doAIGuess(io: Server) {
   if (room.aiCorrect || room.phase !== "playing") return;
 
-  const result = getAIGuess(room.currentWord, room.aiGuessCount);
+  let result;
+  if (room.latestSnapshot) {
+    result = await guessFromImage(room.latestSnapshot, room.currentWord, room.aiGuessCount);
+  } else {
+    result = getMockGuess(room.currentWord, room.aiGuessCount);
+  }
   room.aiGuessCount++;
+
+  // 非同期処理中にラウンドが終わっていたら無視
+  if (room.aiCorrect || room.phase !== "playing") return;
 
   if (result.isCorrect) {
     room.aiCorrect = true;
@@ -274,6 +286,7 @@ function resetGame() {
   room.aiCorrect = false;
   room.roundScoreDeltas.clear();
   room.strokeHistory = [];
+  room.latestSnapshot = null;
 
   // スコアリセット
   for (const player of room.players.values()) {
@@ -282,85 +295,107 @@ function resetGame() {
   }
 }
 
-export function setupSocketHandlers(io: Server) {
-  io.on("connection", (socket) => {
-    console.log(`接続: ${socket.id}`);
+export function registerBattleHandlers(io: Server, socket: import("socket.io").Socket) {
+  socket.on("join", ({ nickname }: { nickname: string }) => {
+    const player: Player = {
+      id: socket.id,
+      nickname,
+      score: 0,
+      hasDrawn: false,
+      connected: true,
+    };
+    room.players.set(socket.id, player);
+    broadcastLobby(io);
 
-    socket.on("join", ({ nickname }: { nickname: string }) => {
-      const player: Player = {
-        id: socket.id,
-        nickname,
-        score: 0,
-        hasDrawn: false,
-        connected: true,
-      };
-      room.players.set(socket.id, player);
-      broadcastLobby(io);
+    // プレイ中に参加した場合、キャンバス状態を送信
+    if (room.phase === "playing" && room.strokeHistory.length > 0) {
+      socket.emit("canvas_state", { strokes: room.strokeHistory });
+    }
 
-      // プレイ中に参加した場合、キャンバス状態を送信
-      if (room.phase === "playing" && room.strokeHistory.length > 0) {
-        socket.emit("canvas_state", { strokes: room.strokeHistory });
-      }
+    console.log(`[バトル] 参加: ${nickname} (${socket.id})`);
+  });
 
-      console.log(`参加: ${nickname} (${socket.id})`);
-    });
+  // モード付きゲーム開始 → 全員を該当ページへリダイレクト
+  socket.on("start_game_mode", ({ mode }: { mode: string }) => {
+    if (room.phase !== "lobby") return;
+    if (room.players.size < 2) return;
 
-    socket.on("start_game", () => {
-      if (room.phase !== "lobby") return;
-      if (room.players.size < 2) return;
-
+    if (mode === "battle") {
       resetGame();
-
-      // 描き手の順番をシャッフル
       const playerIds = Array.from(room.players.keys());
       room.drawerOrder = playerIds.sort(() => Math.random() - 0.5);
       room.totalRounds = room.drawerOrder.length;
-
       startRound(io);
-    });
+    } else {
+      // モード2/3: 全プレイヤーをリダイレクト後、ロビーをリセット
+      const path = mode === "teleport" ? "/game/teleport" : "/game/sketch";
+      io.emit("redirect", { path });
+      // バトルルームのプレイヤーをクリア（別モードに移行するため）
+      room.players.clear();
+    }
+  });
 
-    socket.on("draw", (data: { points: { x: number; y: number }[]; color: string; width: number }) => {
-      if (room.phase !== "playing") return;
-      if (socket.id !== room.drawerId) return;
-      room.strokeHistory.push(data);
-      socket.broadcast.emit("draw", data);
-    });
+  socket.on("start_game", () => {
+    if (room.phase !== "lobby") return;
+    if (room.players.size < 2) return;
 
-    socket.on("clear_canvas", () => {
-      if (room.phase !== "playing") return;
-      if (socket.id !== room.drawerId) return;
-      room.strokeHistory = [];
-      socket.broadcast.emit("clear_canvas");
-    });
+    resetGame();
 
-    socket.on("guess", ({ text }: { text: string }) => {
-      handleGuess(io, socket.id, text);
-    });
+    // 描き手の順番をシャッフル
+    const playerIds = Array.from(room.players.keys());
+    room.drawerOrder = playerIds.sort(() => Math.random() - 0.5);
+    room.totalRounds = room.drawerOrder.length;
 
-    socket.on("return_to_lobby", () => {
-      if (room.phase === "game_end") {
-        resetGame();
-        broadcastLobby(io);
+    startRound(io);
+  });
+
+  socket.on("draw", (data: { points: { x: number; y: number }[]; color: string; width: number }) => {
+    if (room.phase !== "playing") return;
+    if (socket.id !== room.drawerId) return;
+    room.strokeHistory.push(data);
+    socket.broadcast.emit("draw", data);
+  });
+
+  socket.on("clear_canvas", () => {
+    if (room.phase !== "playing") return;
+    if (socket.id !== room.drawerId) return;
+    room.strokeHistory = [];
+    socket.broadcast.emit("clear_canvas");
+  });
+
+  socket.on("canvas_snapshot", ({ imageBase64 }: { imageBase64: string }) => {
+    if (room.phase !== "playing") return;
+    if (socket.id !== room.drawerId) return;
+    room.latestSnapshot = imageBase64;
+  });
+
+  socket.on("guess", ({ text }: { text: string }) => {
+    handleGuess(io, socket.id, text);
+  });
+
+  socket.on("return_to_lobby", () => {
+    if (room.phase === "game_end") {
+      resetGame();
+      broadcastLobby(io);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    const player = room.players.get(socket.id);
+    if (player) {
+      console.log(`[バトル] 切断: ${player.nickname}`);
+      player.connected = false;
+
+      // ロビー中なら削除
+      if (room.phase === "lobby") {
+        room.players.delete(socket.id);
       }
-    });
+      broadcastLobby(io);
 
-    socket.on("disconnect", () => {
-      const player = room.players.get(socket.id);
-      if (player) {
-        console.log(`切断: ${player.nickname}`);
-        player.connected = false;
-
-        // ロビー中なら削除
-        if (room.phase === "lobby") {
-          room.players.delete(socket.id);
-        }
-        broadcastLobby(io);
-
-        // 描き手が切断したらラウンド終了
-        if (room.phase === "playing" && socket.id === room.drawerId) {
-          endRound(io);
-        }
+      // 描き手が切断したらラウンド終了
+      if (room.phase === "playing" && socket.id === room.drawerId) {
+        endRound(io);
       }
-    });
+    }
   });
 }

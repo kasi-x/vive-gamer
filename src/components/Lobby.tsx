@@ -1,12 +1,16 @@
 "use client";
 
+import { useState } from "react";
+import ModeSelect, { type GameMode } from "./ModeSelect";
+
 interface LobbyProps {
   players: { id: string; nickname: string; score: number }[];
-  onStartGame: () => void;
+  onStartGame: (mode: GameMode) => void;
   myId: string | undefined;
 }
 
 export default function Lobby({ players, onStartGame, myId }: LobbyProps) {
+  const [selectedMode, setSelectedMode] = useState<GameMode>("battle");
   const canStart = players.length >= 2;
 
   return (
@@ -47,8 +51,12 @@ export default function Lobby({ players, onStartGame, myId }: LobbyProps) {
           </div>
         </div>
 
+        <div className="bg-[var(--surface)] rounded-2xl p-6 mb-4">
+          <ModeSelect selectedMode={selectedMode} onSelect={setSelectedMode} />
+        </div>
+
         <button
-          onClick={onStartGame}
+          onClick={() => onStartGame(selectedMode)}
           disabled={!canStart}
           className="w-full bg-[var(--accent)] hover:bg-[var(--accent)]/80 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl text-lg transition"
         >

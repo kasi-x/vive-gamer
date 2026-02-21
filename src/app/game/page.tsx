@@ -9,6 +9,7 @@ import ViewCanvas from "@/components/ViewCanvas";
 import GuessingPanel from "@/components/GuessingPanel";
 import GameHeader from "@/components/GameHeader";
 import Scoreboard from "@/components/Scoreboard";
+import type { GameMode } from "@/components/ModeSelect";
 import type {
   GamePhase,
   LobbyUpdatePayload,
@@ -40,8 +41,9 @@ export default function GamePage() {
   const socket = getSocket();
   const isDrawer = myId === drawerId;
 
-  const handleStartGame = useCallback(() => {
-    socket.emit("start_game");
+  const handleStartGame = useCallback((mode: GameMode) => {
+    // 全モード共通: サーバーに mode 付きで emit → サーバーが全員をリダイレクト
+    socket.emit("start_game_mode", { mode });
   }, [socket]);
 
   const handleReturnToLobby = useCallback(() => {
@@ -65,8 +67,12 @@ export default function GamePage() {
 
     socket.on("lobby_update", (data: LobbyUpdatePayload) => {
       setPlayers(data.players);
-      // サーバーからlobby_updateが来たらlobbyフェーズに戻す
       setPhase((prev) => (prev === "game_end" ? "lobby" : prev));
+    });
+
+    // モード2/3選択時: サーバーからの全員リダイレクト
+    socket.on("redirect", ({ path }: { path: string }) => {
+      router.push(path);
     });
 
     socket.on("game_start", (data: GameStartPayload) => {
@@ -104,7 +110,6 @@ export default function GamePage() {
     });
 
     socket.on("reconnect" as string, () => {
-      // 再接続時にjoinを再送信
       setMyId(socket.id);
       setConnected(true);
       socket.emit("join", { nickname });
