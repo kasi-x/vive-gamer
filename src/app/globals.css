@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f0f1a;
+  --surface: #1a1a2e;
+  --surface-light: #252542;
+  --accent: #e94560;
+  --accent-2: #0f3460;
+  --text: #eaeaea;
+  --text-dim: #8888aa;
+  --success: #4ade80;
+  --warning: #fbbf24;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+/* カスタムスクロールバー */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-light);
+  border-radius: 3px;
+}
