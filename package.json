@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
+    "predev": "tsx scripts/dev-clean.ts",
     "dev": "tsx server.ts",
+    "dev:clean": "tsx scripts/dev-clean.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts"
   },

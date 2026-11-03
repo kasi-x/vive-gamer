@@ -23,6 +23,10 @@ export default function ConfettiOverlay({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (!active) return;
+    // アニメーション削減設定時は花吹雪をスキップ（低スペックGPU対策）
+    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
 

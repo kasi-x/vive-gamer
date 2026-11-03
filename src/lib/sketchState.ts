@@ -20,6 +20,7 @@ interface SketchRoom {
   phase: SketchPhase;
   timer: ReturnType<typeof setInterval> | null;
   compositeTimer: ReturnType<typeof setInterval> | null;
+  voteTimeout: ReturnType<typeof setTimeout> | null;
   remaining: number;
   currentRound: number;
   totalRounds: number;
@@ -36,6 +37,7 @@ const room: SketchRoom = {
   phase: "lobby",
   timer: null,
   compositeTimer: null,
+  voteTimeout: null,
   remaining: 0,
   currentRound: 0,
   totalRounds: TOTAL_ROUNDS,
@@ -60,6 +62,8 @@ function broadcastLobby(io: Server) {
   io.to(SKETCH_ROOM).emit("sketch:lobby_update", { players: getPlayerList() });
 }
 
+const VOTE_TIME = 20;
+
 function clearTimers() {
   if (room.timer) {
     clearInterval(room.timer);
@@ -68,6 +72,10 @@ function clearTimers() {
   if (room.compositeTimer) {
     clearInterval(room.compositeTimer);
     room.compositeTimer = null;
+  }
+  if (room.voteTimeout) {
+    clearTimeout(room.voteTimeout);
+    room.voteTimeout = null;
   }
 }
 
@@ -202,9 +210,17 @@ function startVoting(io: Server) {
     round: room.currentRound,
     totalRounds: room.totalRounds,
   });
+
+  // 全員が投票しなくてもタイムアウトで集計（デッドロック防止）
+  room.voteTimeout = setTimeout(() => tallyVotes(io), VOTE_TIME * 1000);
 }
 
 function tallyVotes(io: Server) {
+  if (room.phase !== "voting") return;
+  if (room.voteTimeout) {
+    clearTimeout(room.voteTimeout);
+    room.voteTimeout = null;
+  }
   room.phase = "result";
 
   const voteCounts = new Map<string, number>();
@@ -268,6 +284,29 @@ function resetGame() {
   }
 }
 
+// 途中参加・再接続時に現在のフェーズを単独送信
+function sendPhaseSync(io: Server, socket: import("socket.io").Socket) {
+  if (room.phase === "lobby") return;
+
+  const allStrokes = Array.from(room.playerStrokes.entries()).map(([id, strokes]) => ({
+    playerId: id,
+    nickname: room.players.get(id)?.nickname || "???",
+    strokes,
+  }));
+
+  socket.emit("sketch:phase", {
+    phase: room.phase,
+    subject: room.currentSubject,
+    round: room.currentRound,
+    totalRounds: room.totalRounds,
+    timeLimit: room.remaining,
+    allStrokes: room.phase === "composite_reveal" ? allStrokes : undefined,
+    players: room.phase === "voting"
+      ? Array.from(room.players.values()).map((p) => ({ id: p.id, nickname: p.nickname }))
+      : undefined,
+  });
+}
+
 export function registerSketchHandlers(io: Server, socket: import("socket.io").Socket) {
   socket.on("sketch:join", ({ nickname }: { nickname: string }) => {
     socket.join(SKETCH_ROOM);
@@ -277,7 +316,12 @@ export function registerSketchHandlers(io: Server, socket: import("socket.io").S
       score: 0,
       connected: true,
     });
+    // ゲーム途中参加でもストロークが記録されるように
+    if (!room.playerStrokes.has(socket.id)) {
+      room.playerStrokes.set(socket.id, []);
+    }
     broadcastLobby(io);
+    sendPhaseSync(io, socket);
     console.log(`[スケッチ] 参加: ${nickname}`);
   });
 
@@ -302,8 +346,7 @@ export function registerSketchHandlers(io: Server, socket: import("socket.io").S
     if (targetPlayerId === socket.id) return;
     room.votes.set(socket.id, targetPlayerId);
 
-    const connectedCount = Array.from(room.players.values()).filter(p => p.connected).length;
-    if (room.votes.size >= connectedCount) {
+    if (room.votes.size >= countConnected()) {
       tallyVotes(io);
     }
   });
@@ -320,7 +363,15 @@ export function registerSketchHandlers(io: Server, socket: import("socket.io").S
       if (room.phase === "lobby") {
         room.players.delete(socket.id);
       }
+      // 残りの接続者全員が既に投票していたら即集計
+      if (room.phase === "voting" && room.votes.size >= countConnected()) {
+        tallyVotes(io);
+      }
       broadcastLobby(io);
     }
   });
+}
+
+function countConnected(): number {
+  return Array.from(room.players.values()).filter((p) => p.connected).length;
 }

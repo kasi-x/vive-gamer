@@ -1,8 +1,9 @@
 import { getAIGuess as getMockGuess, type AIGuessResult } from "./mockAI";
 
-const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = "gemini-2.5-flash-preview-05-20";
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+const MODEL = "gemini-2.5-flash";
+function getApiUrl() {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+}
 
 const normalize = (s: string) =>
   s.trim().normalize("NFC").toLowerCase()
@@ -35,7 +36,7 @@ export async function guessFromImage(
   currentWord: string,
   attemptNumber: number
 ): Promise<AIGuessResult> {
-  if (!API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     console.log("[AI] APIキー未設定 → mockAIフォールバック");
     return getMockGuess(currentWord, attemptNumber);
   }
@@ -44,7 +45,7 @@ export async function guessFromImage(
     // data:image/png;base64, プレフィックスを除去
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-    const res = await fetch(API_URL, {
+    const res = await fetch(getApiUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -228,6 +228,18 @@ export default function TeleportPage() {
             ) : (
               <>
                 <p className="text-[var(--text-dim)] mb-3">AIに描いてほしい画像のプロンプトを入力してください</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {["宇宙を泳ぐクジラ", "森の中の城", "空飛ぶ猫", "海底の街", "雲の上のカフェ"].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setPrompt(s)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-[var(--surface-light)] hover:bg-[var(--accent)]/20 transition text-[var(--text-dim)]"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}

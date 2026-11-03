@@ -1,22 +1,64 @@
 // Gemini 2.5 Flash Image を REST API で直接呼び出し（依存追加不要）
-// フォールバック: APIキー未設定 or エラー時はモックSVGを返す
-// キャッシュ: 同じプロンプト+スタイルの画像を50%の確率で再利用
+// フォールバック: 事前生成済み画像 → キャッシュ → API → モックSVG
 
+import { readFileSync, existsSync } from "fs";
+import { resolve } from "path";
 import { generateMockImage } from "./mockImages";
 import type { StyleCard } from "../types/game";
 
-const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = "gemini-2.5-flash-preview-05-20";
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+// API_KEY は遅延取得（import時にはまだ .env.local が未読み込みの場合がある）
+const MODEL = "gemini-2.5-flash-image";
+function getApiUrl() {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+}
 
-const CACHE_REUSE_RATE = 0.5; // キャッシュ再利用確率
+const CACHE_REUSE_RATE = 0.5;
 const MAX_CACHE_SIZE = 100;
 
-// プロンプト+スタイル → 生成済み画像のキャッシュ（複数バリエーション保持）
+// ランタイムキャッシュ
 const imageCache = new Map<string, string[]>();
+
+// 事前生成済み画像マッピング（public/teleport/mapping.json）
+let pregenMapping: Record<string, string> | null = null;
+
+function loadPregenMapping(): Record<string, string> {
+  if (pregenMapping) return pregenMapping;
+  try {
+    const mapPath = resolve(process.cwd(), "public/teleport/mapping.json");
+    if (existsSync(mapPath)) {
+      pregenMapping = JSON.parse(readFileSync(mapPath, "utf-8"));
+      console.log(`[画像生成] 事前生成マッピング読み込み: ${Object.keys(pregenMapping!).length}件`);
+      return pregenMapping!;
+    }
+  } catch {
+    // 読み込み失敗は無視
+  }
+  pregenMapping = {};
+  return pregenMapping;
+}
 
 function cacheKey(prompt: string, styleCard?: StyleCard): string {
   return `${prompt}|||${styleCard || ""}`;
+}
+
+function getPregenImage(prompt: string, styleCard?: StyleCard): string | null {
+  const mapping = loadPregenMapping();
+  const key = cacheKey(prompt, styleCard);
+  const path = mapping[key];
+  if (!path) return null;
+
+  // publicパスからファイルを読んでbase64化
+  const filePath = resolve(process.cwd(), "public", path.replace(/^\//, ""));
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const buf = readFileSync(filePath);
+    const b64 = buf.toString("base64");
+    console.log(`[画像生成] 事前生成画像使用: ${prompt.slice(0, 30)}...`);
+    return `data:image/png;base64,${b64}`;
+  } catch {
+    return null;
+  }
 }
 
 function getCachedImage(prompt: string, styleCard?: StyleCard): string | null {
@@ -26,21 +68,19 @@ function getCachedImage(prompt: string, styleCard?: StyleCard): string | null {
 
   if (Math.random() < CACHE_REUSE_RATE) {
     const pick = cached[Math.floor(Math.random() * cached.length)];
-    console.log(`[画像生成] キャッシュ再利用: ${prompt.slice(0, 30)}... (${cached.length}件中)`);
+    console.log(`[画像生成] キャッシュ再利用: ${prompt.slice(0, 30)}...`);
     return pick;
   }
-  return null; // 新規生成
+  return null;
 }
 
 function addToCache(prompt: string, styleCard: StyleCard | undefined, image: string) {
   const key = cacheKey(prompt, styleCard);
   const existing = imageCache.get(key) || [];
   existing.push(image);
-  // 1キーあたり最大5バリエーション
   if (existing.length > 5) existing.shift();
   imageCache.set(key, existing);
 
-  // 全体サイズ制限
   if (imageCache.size > MAX_CACHE_SIZE) {
     const firstKey = imageCache.keys().next().value;
     if (firstKey) imageCache.delete(firstKey);
@@ -63,21 +103,26 @@ export async function generateImageFromPrompt(
   prompt: string,
   styleCard?: StyleCard
 ): Promise<string> {
-  if (!API_KEY) {
+  // 1. 事前生成済み画像チェック（最優先）
+  const pregen = getPregenImage(prompt, styleCard);
+  if (pregen) return pregen;
+
+  // 2. ランタイムキャッシュチェック
+  const cached = getCachedImage(prompt, styleCard);
+  if (cached) return cached;
+
+  // 3. Gemini API
+  if (!process.env.GEMINI_API_KEY) {
     console.log("[画像生成] APIキー未設定 → モック画像");
     return generateMockImage(prompt, styleCard);
   }
-
-  // キャッシュチェック
-  const cached = getCachedImage(prompt, styleCard);
-  if (cached) return cached;
 
   const fullPrompt = styleCard
     ? `以下のプロンプトを「${styleCard}」スタイルで画像にしてください。テキストや文字は含めないでください。\n\nプロンプト: ${prompt}`
     : `以下のプロンプトを画像にしてください。テキストや文字は含めないでください。\n\nプロンプト: ${prompt}`;
 
   try {
-    const res = await fetch(API_URL, {
+    const res = await fetch(getApiUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -106,7 +151,6 @@ export async function generateImageFromPrompt(
       return generateMockImage(prompt, styleCard);
     }
 
-    // 画像パートを探す
     for (const part of parts) {
       if (part.inlineData?.data) {
         const mimeType = part.inlineData.mimeType || "image/png";

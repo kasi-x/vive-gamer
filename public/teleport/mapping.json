@@ -1,0 +1,20 @@
+{
+  "宇宙を泳ぐクジラ|||サイバーパンク": "/teleport/r1_whale_cyber.png",
+  "宇宙を泳ぐクジラ|||水彩画": "/teleport/r1_whale_watercolor.png",
+  "森の中の城|||粘土細工": "/teleport/r1_castle_clay.png",
+  "森の中の城|||浮世絵": "/teleport/r1_castle_ukiyoe.png",
+  "空飛ぶ猫|||80年代レトロ": "/teleport/r1_cat_retro.png",
+  "空飛ぶ猫|||パステル": "/teleport/r1_cat_pastel.png",
+  "海底の街|||ドット絵": "/teleport/r1_underwater_pixel.png",
+  "海底の街|||アメコミ": "/teleport/r1_underwater_comic.png",
+  "不思議な風景|||サイバーパンク": "/teleport/r1_landscape_cyber.png",
+  "不思議な風景|||水彩画": "/teleport/r1_landscape_watercolor.png",
+  "雲の上のカフェ|||パステル": "/teleport/r1_cafe_pastel.png",
+  "雲の上のカフェ|||粘土細工": "/teleport/r1_cafe_clay.png",
+  "青い背景に白い大きな生き物が浮かんでいる|||": "/teleport/r2_blue_creature.png",
+  "緑の木々に囲まれた大きな建物|||": "/teleport/r2_building_trees.png",
+  "空に浮かぶふわふわの動物|||": "/teleport/r2_flying_animal.png",
+  "水の中にビルや家がある不思議な世界|||": "/teleport/r2_underwater_city.png",
+  "空の上にテーブルや椅子がある場所|||": "/teleport/r2_sky_cafe.png",
+  "カラフルで不思議な景色|||": "/teleport/r2_colorful_landscape.png"
+}

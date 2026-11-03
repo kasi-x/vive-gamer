@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
+import { soundManager } from "@/lib/sounds";
+import ConfettiOverlay from "@/components/ConfettiOverlay";
 import type { SketchSubject } from "@/types/game";
 
 type Phase = "lobby" | "show_incomplete" | "drawing" | "composite_reveal" | "voting" | "result" | "game_end";
@@ -13,43 +15,125 @@ interface StrokeData {
   width: number;
 }
 
-// 不完全画像の描画（Canvas APIで基本図形のみ）
+// 不完全画像の描画（実線=お題の土台、破線=描き足すべき場所のヒント）
 function drawIncompleteImage(ctx: CanvasRenderingContext2D, subjectId: string) {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "#888888";
   ctx.lineWidth = 3;
+
+  const solid = () => {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "#888888";
+  };
+  const hint = () => {
+    ctx.setLineDash([10, 10]);
+    ctx.strokeStyle = "#c8c8c8";
+  };
+
+  ctx.beginPath();
+  ctx.setLineDash([]);
 
   switch (subjectId) {
     case "face":
+      solid();
       ctx.beginPath();
       ctx.arc(w / 2, h / 2, 150, 0, Math.PI * 2);
       ctx.stroke();
+      hint();
+      ctx.beginPath();
+      ctx.arc(w / 2 - 50, h / 2 - 40, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(w / 2 + 50, h / 2 - 40, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w / 2, h / 2 - 10);
+      ctx.lineTo(w / 2, h / 2 + 20);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2 + 45, 42, 0, Math.PI);
+      ctx.stroke();
       break;
     case "house":
+      solid();
       ctx.strokeRect(w / 2 - 120, h / 2 - 60, 240, 180);
+      hint();
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - 140, h / 2 - 60);
+      ctx.lineTo(w / 2, h / 2 - 160);
+      ctx.lineTo(w / 2 + 140, h / 2 - 60);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.strokeRect(w / 2 - 25, h / 2 + 40, 50, 80);
+      ctx.strokeRect(w / 2 - 95, h / 2 - 30, 55, 50);
       break;
     case "animal":
+      solid();
       ctx.beginPath();
-      ctx.ellipse(w / 2, h / 2, 180, 100, 0, 0, Math.PI * 2);
+      ctx.ellipse(w / 2 + 30, h / 2 + 20, 180, 100, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      hint();
+      ctx.beginPath();
+      ctx.arc(w / 2 - 180, h / 2 - 40, 58, 0, Math.PI * 2);
+      ctx.stroke();
+      for (const lx of [w / 2 - 90, w / 2 - 30, w / 2 + 90, w / 2 + 150]) {
+        ctx.beginPath();
+        ctx.moveTo(lx, h / 2 + 105);
+        ctx.lineTo(lx, h / 2 + 170);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(w / 2 + 205, h / 2 - 10);
+      ctx.quadraticCurveTo(w / 2 + 260, h / 2 - 70, w / 2 + 230, h / 2 - 130);
       ctx.stroke();
       break;
     case "rocket":
+      solid();
       ctx.beginPath();
       ctx.moveTo(w / 2, h / 2 - 160);
       ctx.lineTo(w / 2 + 80, h / 2 + 100);
       ctx.lineTo(w / 2 - 80, h / 2 + 100);
       ctx.closePath();
       ctx.stroke();
+      hint();
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2 - 30, 32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - 80, h / 2 + 100);
+      ctx.lineTo(w / 2 - 140, h / 2 + 160);
+      ctx.lineTo(w / 2 - 40, h / 2 + 140);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w / 2 + 80, h / 2 + 100);
+      ctx.lineTo(w / 2 + 140, h / 2 + 160);
+      ctx.lineTo(w / 2 + 40, h / 2 + 140);
+      ctx.stroke();
       break;
     case "fish":
+      solid();
       ctx.beginPath();
-      ctx.ellipse(w / 2, h / 2, 180, 80, 0, 0, Math.PI * 2);
+      ctx.ellipse(w / 2 + 40, h / 2, 170, 90, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      hint();
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - 125, h / 2);
+      ctx.lineTo(w / 2 - 210, h / 2 - 70);
+      ctx.lineTo(w / 2 - 210, h / 2 + 70);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(w / 2 + 120, h / 2 - 30, 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w / 2 + 20, h / 2 - 85);
+      ctx.quadraticCurveTo(w / 2 + 70, h / 2 - 150, w / 2 + 110, h / 2 - 80);
       ctx.stroke();
       break;
   }
+  ctx.setLineDash([]);
 }
 
 // ストロークをキャンバスに描画
@@ -90,9 +174,11 @@ export default function SketchPage() {
   const [winner, setWinner] = useState("");
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(6);
+  const [liveComposite, setLiveComposite] = useState<{ playerId: string; strokes: StrokeData[] }[] | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const liveCanvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
   const currentPoints = useRef<{ x: number; y: number }[]>([]);
   const lastSendTime = useRef(0);
@@ -205,6 +291,24 @@ export default function SketchPage() {
     }
   }, [phase, allPlayerStrokes, subject]);
 
+  // 描画中のライブ合成プレビュー（15秒ごとにサーバーから配信）
+  useEffect(() => {
+    if (phase === "drawing" && liveCanvasRef.current && subject && liveComposite) {
+      const ctx = liveCanvasRef.current.getContext("2d")!;
+      drawIncompleteImage(ctx, subject.id);
+      for (const ps of liveComposite) {
+        drawStrokes(ctx, ps.strokes);
+      }
+    }
+  }, [phase, liveComposite, subject]);
+
+  // フェーズ転換の効果音
+  useEffect(() => {
+    if (phase === "drawing") soundManager?.roundStart();
+    if (phase === "result") soundManager?.correct();
+    if (phase === "game_end") soundManager?.gameEnd();
+  }, [phase]);
+
   // Socket events
   useEffect(() => {
     const nickname = sessionStorage.getItem("nickname");
@@ -243,6 +347,10 @@ export default function SketchPage() {
       setRemaining(data.remaining);
     });
 
+    s.on("sketch:composite", (data: { allStrokes: { playerId: string; strokes: StrokeData[] }[] }) => {
+      setLiveComposite(data.allStrokes);
+    });
+
     s.on("sketch:phase", (data: {
       phase: Phase;
       subject?: SketchSubject;
@@ -260,6 +368,10 @@ export default function SketchPage() {
       if (data.subject) setSubject(data.subject);
       if (data.round !== undefined) setRound(data.round);
       if (data.totalRounds !== undefined) setTotalRounds(data.totalRounds);
+
+      if (data.phase === "drawing") {
+        setLiveComposite(null);
+      }
 
       if (data.phase === "composite_reveal" && data.allStrokes) {
         setAllPlayerStrokes(data.allStrokes);
@@ -286,6 +398,7 @@ export default function SketchPage() {
       s.off("connect", onConnect);
       s.off("sketch:lobby_update");
       s.off("sketch:timer_tick");
+      s.off("sketch:composite");
       s.off("sketch:phase");
       s.off("disconnect");
     };
@@ -433,6 +546,26 @@ export default function SketchPage() {
             ))}
           </div>
         </div>
+
+        <div className="flex items-center gap-3 bg-[var(--surface)] rounded-xl px-3 py-2">
+          <div className="flex-shrink-0">
+            <canvas
+              ref={liveCanvasRef}
+              width={400}
+              height={300}
+              className="rounded-lg border border-[var(--surface-light)] bg-white w-28 sm:w-36"
+              style={{ aspectRatio: "4/3" }}
+            />
+          </div>
+          <div className="text-xs sm:text-sm text-[var(--text-dim)]">
+            <p className="font-bold text-[var(--text)] mb-0.5">みんなの合成（ライブ）</p>
+            {liveComposite ? (
+              <p>全員の絵が15秒ごとに重なっていく…！</p>
+            ) : (
+              <p>最初の合成は15秒後に表示されます</p>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -527,6 +660,7 @@ export default function SketchPage() {
   if (phase === "game_end") {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
+        <ConfettiOverlay active />
         <div className="w-full max-w-lg">
           <div className="text-center mb-6">
             <h2 className="text-3xl font-bold mb-2">🏆 最終結果</h2>

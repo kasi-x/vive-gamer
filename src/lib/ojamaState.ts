@@ -1,9 +1,8 @@
 import type { Server } from "socket.io";
 import { pickOjamaWord, normalizeJapanese, type OjamaWord } from "./ojamaWords";
 
-const ROUND_TIME = 20;
+const ROUND_TIME = 30;
 const TOTAL_ROUNDS = 5;
-const SPLAT_MAX = 5;
 const ROOM = "mode:ojama";
 
 interface OjamaPlayer {
@@ -11,7 +10,6 @@ interface OjamaPlayer {
   nickname: string;
   score: number;
   connected: boolean;
-  splatCount: number;
 }
 
 interface OjamaRoom {
@@ -66,14 +64,13 @@ function startCountdown(io: Server) {
   room.currentRound++;
   room.roundWinnerId = null;
 
-  // 全員のスプラットをリセット
-  for (const p of room.players.values()) {
-    p.splatCount = 0;
-  }
-
+  // 問題を選択（画像は事前生成済み）
   const difficulty = getDifficulty(room.currentRound);
-  room.currentWord = pickOjamaWord(room.usedWords, difficulty);
-  room.usedWords.push(room.currentWord.word);
+  const word = pickOjamaWord(room.usedWords, difficulty);
+  room.currentWord = word;
+  room.usedWords.push(word.word);
+
+  console.log(`[おじゃま] ラウンド${room.currentRound}: ${word.word}`);
 
   io.to(ROOM).emit("ojama:countdown", {
     round: room.currentRound,
@@ -101,11 +98,13 @@ function startRound(io: Server) {
   room.phase = "playing";
   room.remaining = ROUND_TIME;
 
+  // 全プレイヤーに同じ画像パスとヒントを送信
   io.to(ROOM).emit("ojama:start", {
     round: room.currentRound,
     totalRounds: TOTAL_ROUNDS,
     hint: room.currentWord!.hint,
     difficulty: room.currentWord!.difficulty,
+    image: room.currentWord!.image, // 事前生成済み画像パス
     timeLimit: ROUND_TIME,
   });
 
@@ -127,17 +126,20 @@ function endRound(io: Server) {
     .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
     .sort((a, b) => b.score - a.score);
 
+  const winnerPlayer = room.roundWinnerId ? room.players.get(room.roundWinnerId) : null;
+
   io.to(ROOM).emit("ojama:round_end", {
-    word: room.currentWord!.word,
-    winnerId: room.roundWinnerId,
-    winnerNickname: room.roundWinnerId ? room.players.get(room.roundWinnerId)?.nickname : null,
+    answer: room.currentWord!.word,
+    description: room.currentWord!.description,
+    image: room.currentWord!.image,
+    winnerNickname: winnerPlayer?.nickname || null,
     scores,
   });
 
   if (room.currentRound >= TOTAL_ROUNDS) {
-    setTimeout(() => endGame(io), 3000);
+    setTimeout(() => endGame(io), 4000);
   } else {
-    setTimeout(() => startCountdown(io), 3000);
+    setTimeout(() => startCountdown(io), 4000);
   }
 }
 
@@ -164,7 +166,6 @@ function resetRoom() {
   room.roundWinnerId = null;
   for (const p of room.players.values()) {
     p.score = 0;
-    p.splatCount = 0;
   }
 }
 
@@ -183,7 +184,6 @@ export function registerOjamaHandlers(io: Server, socket: import("socket.io").So
       nickname,
       score: 0,
       connected: true,
-      splatCount: 0,
     });
     broadcastLobby(io);
     console.log(`[おじゃま] 参加: ${nickname} (${socket.id})`);
@@ -198,16 +198,20 @@ export function registerOjamaHandlers(io: Server, socket: import("socket.io").So
 
   socket.on("ojama:guess", ({ text }: { text: string }) => {
     if (room.phase !== "playing") return;
-    if (!room.currentWord) return;
 
     const player = room.players.get(socket.id);
     if (!player) return;
+
+    // 既に勝者がいるなら無視
+    if (room.roundWinnerId) return;
+
+    if (!room.currentWord) return;
 
     const normalized = normalizeJapanese(text);
     const answer = normalizeJapanese(room.currentWord.word);
 
     if (normalized === answer) {
-      // 正解
+      // 正解！このラウンドの勝者
       room.roundWinnerId = socket.id;
       const timeBonus = Math.round(50 * (room.remaining / ROUND_TIME));
       const earned = 100 + timeBonus;
@@ -219,24 +223,17 @@ export function registerOjamaHandlers(io: Server, socket: import("socket.io").So
         earned,
       });
 
-      // 相手にスプラット送信
+      // 負けたプレイヤー全員にインクぶちまけ
       for (const [id, p] of room.players) {
-        if (id !== socket.id && p.connected && p.splatCount < SPLAT_MAX) {
-          p.splatCount++;
-          io.to(id).emit("ojama:splat", {
+        if (id !== socket.id && p.connected) {
+          io.to(id).emit("ojama:mega_splat", {
             fromNickname: player.nickname,
-            splatId: Date.now() + Math.random(),
           });
         }
       }
 
-      // 正解したプレイヤーのスプラット1個消去
-      if (player.splatCount > 0) {
-        player.splatCount--;
-        io.to(socket.id).emit("ojama:clear_splat");
-      }
-
-      endRound(io);
+      // 2秒後にラウンド終了
+      setTimeout(() => endRound(io), 2000);
     } else {
       // 不正解
       io.to(socket.id).emit("ojama:wrong");
